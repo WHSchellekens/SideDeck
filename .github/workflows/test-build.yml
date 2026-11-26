@@ -2,6 +2,9 @@ name: Test build (debug APK)
 
 # Builds the sidekick-tuning branch on every push and publishes the APK as the
 # "sidekick-test" pre-release, so it can be downloaded straight onto a phone.
+# A release build (optimized engine, like the store app) signed with a cached
+# debug key: a debug build compiles the C++ engine at -O0, too slow for keylock
+# in real time.
 # Analyze and the tests run first; they don't block the APK, but a failure in
 # any of them marks the run as failed.
 #
@@ -98,8 +101,9 @@ jobs:
           cmake --build build/native-tests
           ctest --test-dir build/native-tests --output-on-failure
 
-      - name: Build debug APK (arm64)
-        run: flutter build apk --debug --target-platform android-arm64
+      # No key.properties here, so build.gradle.kts signs release with the debug key.
+      - name: Build release APK (arm64, test key)
+        run: flutter build apk --release --target-platform android-arm64
 
       - name: Save debug signing key
         if: steps.keystore.outputs.cache-hit != 'true'
@@ -112,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sidedeck-test-arm64
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Publish the pre-release
@@ -129,13 +133,13 @@ jobs:
             apk="sidedeck-$TAG.apk"
             title="SideDeck test build ($TAG)"
           fi
-          cp build/app/outputs/flutter-apk/app-debug.apk "$apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$apk"
           gh release delete "$tag" --cleanup-tag --yes || true
           gh release create "$tag" "$apk" \
             --prerelease \
             --target "$sha" \
             --title "$title" \
-            --notes "Debug build of ${sha::7}, for testing. Not a release."
+            --notes "Build of ${sha::7} signed with a test key, for testing. Not a release."
 
       - name: Report checks
         if: steps.analyze.outcome == 'failure' || steps.dart_tests.outcome == 'failure' || steps.engine_tests.outcome == 'failure'

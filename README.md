@@ -69,8 +69,8 @@ with any USB mixer that takes two stereo decks.
 
 Test builds of this fork are on the
 [Releases page](https://github.com/WHSchellekens/SideDeck/releases/tag/sidekick-test):
-a debug APK for 64-bit Android phones, built by GitHub Actions from the
-`sidekick-tuning` branch.
+an APK for 64-bit Android phones, built by GitHub Actions from the
+`sidekick-tuning` branch. It's a release build, signed with a test key.
 
 ```bash
 adb install -r sidedeck-test.apk
