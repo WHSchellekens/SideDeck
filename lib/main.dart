@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sidedeck/state/ui_settings.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
 import 'package:sidedeck/ui/home_page.dart';
 
@@ -57,16 +58,36 @@ void main() {
   );
 }
 
-class SideDeckApp extends StatelessWidget {
+class SideDeckApp extends StatefulWidget {
   const SideDeckApp({super.key});
+
+  @override
+  State<SideDeckApp> createState() => _SideDeckAppState();
+}
+
+class _SideDeckAppState extends State<SideDeckApp> {
+  final UiSettings _ui = UiSettings();
+  late final ThemeData _dark = SideDeckTheme.dark();
+
+  @override
+  void initState() {
+    super.initState();
+    _ui.load();
+  }
+
+  @override
+  void dispose() {
+    _ui.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'SideDeck',
       debugShowCheckedModeBanner: false,
-      theme: SideDeckTheme.dark(),
-      home: const HomePage(),
+      theme: _dark,
+      home: HomePage(ui: _ui),
     );
   }
 }

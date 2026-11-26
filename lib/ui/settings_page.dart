@@ -5,13 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidedeck/engine/usb_output.dart';
 import 'package:sidedeck/state/dj_controller.dart';
+import 'package:sidedeck/state/ui_settings.dart';
 import 'package:sidedeck/subsonic/subsonic_client.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.dj});
+  const SettingsPage({super.key, required this.dj, required this.ui});
 
   final DjController dj;
+  final UiSettings ui;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -230,6 +232,35 @@ class _SettingsPageState extends State<SettingsPage> {
             value: widget.dj.quantize,
             onChanged: (v) async {
               await widget.dj.setQuantize(v);
+              if (mounted) setState(() {});
+            },
+          ),
+          const Divider(height: 32),
+          const Text(
+            'Display',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Waveform',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Solid lines, the Sidekick’s dot matrix, or a filled curve with a '
+            'line along the peaks.',
+            style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<WaveStyle>(
+            showSelectedIcon: false,
+            segments: [
+              for (final s in WaveStyle.values)
+                ButtonSegment(value: s, label: Text(s.label)),
+            ],
+            selected: {widget.ui.waveStyle},
+            onSelectionChanged: (s) async {
+              await widget.ui.setWaveStyle(s.first);
               if (mounted) setState(() {});
             },
           ),

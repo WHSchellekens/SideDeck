@@ -4,6 +4,7 @@ import 'package:sidedeck/engine/music_utils.dart';
 import 'package:sidedeck/engine/usb_output.dart';
 import 'package:sidedeck/state/dj_controller.dart';
 import 'package:sidedeck/state/library_controller.dart';
+import 'package:sidedeck/state/ui_settings.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
 import 'package:sidedeck/ui/library_drawer.dart';
 import 'package:sidedeck/ui/mixer_strip.dart';
@@ -12,7 +13,9 @@ import 'package:sidedeck/ui/seven_segment.dart';
 import 'package:sidedeck/ui/waveform.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, required this.ui});
+
+  final UiSettings ui;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -142,7 +145,7 @@ class _HomePageState extends State<HomePage> {
     if (dj == null) return;
     await Navigator.of(
       context,
-    ).push(MaterialPageRoute(builder: (_) => SettingsPage(dj: dj)));
+    ).push(MaterialPageRoute(builder: (_) => SettingsPage(dj: dj, ui: widget.ui)));
   }
 
   Future<void> _openLibrary() async {
@@ -201,7 +204,7 @@ class _HomePageState extends State<HomePage> {
     final library = _library!;
     final pal = SideDeckColors.of(context);
     return AnimatedBuilder(
-      animation: Listenable.merge([dj, library]),
+      animation: Listenable.merge([dj, library, widget.ui]),
       builder: (context, _) {
         return Scaffold(
           backgroundColor: pal.bg,
@@ -287,6 +290,7 @@ class _HomePageState extends State<HomePage> {
                   bpm: d.bpm,
                   rate: d.rate,
                   scrollRate: _djReady.effectiveRate(i),
+                  style: widget.ui.waveStyle,
                   color: deckColor,
                   loopEnabled: d.loopEnabled,
                   loopStart: d.loopStart,

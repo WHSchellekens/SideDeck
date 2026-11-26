@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:sidedeck/state/ui_settings.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
 
 /// Horizontal scrolling DJ waveform: playhead pinned center, regular beat grid.
@@ -17,6 +19,7 @@ class WaveformPainter extends CustomPainter {
     required this.color,
     required this.peak,
     required this.palette,
+    this.style = WaveStyle.solid,
     this.rate = 1,
     this.loopEnabled = false,
     this.loopStart = 0,
@@ -35,6 +38,7 @@ class WaveformPainter extends CustomPainter {
   /// Max abs amplitude across [min]/[max]; computed once when the wave data changes.
   final double peak;
   final SideDeckColors palette;
+  final WaveStyle style;
   /// Playback rate (file seconds per heard second). Zooms the scrolling
   /// waveform in heard-time so synced decks share a beat grid.
   final double rate;
@@ -83,17 +87,13 @@ class WaveformPainter extends CustomPainter {
     _drawOverview(canvas, size, n, viewStart, viewEnd);
 
     final half = waveH * waveHeight / 2;
-    final paint = Paint();
-    for (var px = 0.0; px < size.width; px++) {
-      final t0 = viewStart + (px / size.width) * viewDur;
-      final t1 = viewStart + ((px + 1) / size.width) * viewDur;
-      if (t1 <= 0 || t0 >= duration) continue;
-      final loHi = _minMaxInRange(t0.clamp(0.0, duration), t1.clamp(0.0, duration), n, duration);
-      final amp = math.max(loHi.$1.abs(), loHi.$2.abs()) / peak;
-      final yHi = mid - (loHi.$2.abs() / peak) * half;
-      final yLo = mid + (loHi.$1.abs() / peak) * half;
-      paint.color = _ampColor(color, amp);
-      canvas.drawRect(Rect.fromLTWH(px, yHi, 1.05, (yLo - yHi).clamp(1.0, waveH)), paint);
+    switch (style) {
+      case WaveStyle.solid:
+        _drawSolid(canvas, size, n, viewStart, viewDur, mid, half, waveH);
+      case WaveStyle.dots:
+        _drawDots(canvas, size, n, viewStart, viewDur, mid, half);
+      case WaveStyle.curve:
+        _drawCurve(canvas, size, n, viewStart, viewDur, mid, half);
     }
 
     // Grid on top of the wave so it stays visible.
@@ -112,6 +112,114 @@ class WaveformPainter extends CustomPainter {
       coreWidth: 2.6,
     );
     _marker(canvas, size.width / 2, waveTop, 6, 8);
+  }
+
+  /// Peak above and below the centre line for one column, as fractions of
+  /// [peak]; null outside the track.
+  (double, double)? _column(int n, double t0, double t1) {
+    if (t1 <= 0 || t0 >= duration) return null;
+    final loHi = _minMaxInRange(t0.clamp(0.0, duration), t1.clamp(0.0, duration), n, duration);
+    return (loHi.$2.abs() / peak, loHi.$1.abs() / peak);
+  }
+
+  /// Vertical lines in the deck colour, fainter for quiet passages.
+  void _drawSolid(Canvas canvas, Size size, int n, double viewStart, double viewDur,
+      double mid, double half, double waveH) {
+    final paint = Paint();
+    for (var px = 0.0; px < size.width; px++) {
+      final t0 = viewStart + (px / size.width) * viewDur;
+      final c = _column(n, t0, t0 + viewDur / size.width);
+      if (c == null) continue;
+      final yHi = mid - c.$1 * half;
+      final yLo = mid + c.$2 * half;
+      paint.color = _ampColor(color, math.max(c.$1, c.$2));
+      canvas.drawRect(Rect.fromLTWH(px, yHi, 1.05, (yLo - yHi).clamp(1.0, waveH)), paint);
+    }
+  }
+
+  /// Lit cells on a 4 px pitch, like the Sidekick's dot-matrix screen.
+  void _drawDots(Canvas canvas, Size size, int n, double viewStart, double viewDur,
+      double mid, double half) {
+    const pitch = 4.0;
+    final rows = (half / pitch).floor();
+    final points = <double>[];
+    for (var x = 0.0; x + pitch <= size.width; x += pitch) {
+      final t0 = viewStart + (x / size.width) * viewDur;
+      final c = _column(n, t0, t0 + pitch / size.width * viewDur);
+      if (c == null) continue;
+      final up = math.min(rows, (c.$1 * half / pitch).round());
+      final down = math.min(rows, (c.$2 * half / pitch).round());
+      final cx = x + pitch / 2;
+      for (var r = 0; r < up; r++) {
+        points
+          ..add(cx)
+          ..add(mid - (r + 0.5) * pitch);
+      }
+      for (var r = 0; r < down; r++) {
+        points
+          ..add(cx)
+          ..add(mid + (r + 0.5) * pitch);
+      }
+    }
+    if (points.isEmpty) return;
+    canvas.drawRawPoints(
+      PointMode.points,
+      Float32List.fromList(points),
+      Paint()
+        ..color = color
+        ..strokeWidth = pitch - 1
+        ..strokeCap = StrokeCap.square,
+    );
+  }
+
+  /// Filled body with a line along the peaks, like the Sidekick's EQ graph.
+  void _drawCurve(Canvas canvas, Size size, int n, double viewStart, double viewDur,
+      double mid, double half) {
+    const step = 1.5;
+    final cols = (size.width / step).ceil() + 1;
+    final top = Float64List(cols);
+    final bottom = Float64List(cols);
+    for (var i = 0; i < cols; i++) {
+      final t0 = viewStart + (i * step / size.width) * viewDur;
+      final c = _column(n, t0, t0 + step / size.width * viewDur);
+      if (c == null) continue;
+      top[i] = c.$1 * half;
+      bottom[i] = c.$2 * half;
+    }
+    final up = _smooth(top);
+    final down = _smooth(bottom);
+    final body = Path()..moveTo(0, mid - up[0]);
+    for (var i = 1; i < cols; i++) {
+      body.lineTo(i * step, mid - up[i]);
+    }
+    for (var i = cols - 1; i >= 0; i--) {
+      body.lineTo(i * step, mid + down[i]);
+    }
+    body.close();
+    canvas.drawPath(body, Paint()..color = palette.waveBody);
+    final edge = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeJoin = StrokeJoin.round;
+    final upper = Path()..moveTo(0, mid - up[0]);
+    final lower = Path()..moveTo(0, mid + down[0]);
+    for (var i = 1; i < cols; i++) {
+      upper.lineTo(i * step, mid - up[i]);
+      lower.lineTo(i * step, mid + down[i]);
+    }
+    canvas.drawPath(upper, edge);
+    canvas.drawPath(lower, edge);
+  }
+
+  static Float64List _smooth(Float64List a) {
+    final out = Float64List(a.length);
+    for (var i = 0; i < a.length; i++) {
+      final prev = a[i == 0 ? 0 : i - 1];
+      final next = a[i == a.length - 1 ? i : i + 1];
+      out[i] = (prev + 2 * a[i] + next) / 4;
+    }
+    return out;
   }
 
   /// The still cell grid of the Sidekick screen, behind everything.
@@ -368,6 +476,7 @@ class WaveformPainter extends CustomPainter {
         oldDelegate.rate != rate ||
         oldDelegate.color != color ||
         oldDelegate.palette != palette ||
+        oldDelegate.style != style ||
         oldDelegate.loopEnabled != loopEnabled ||
         oldDelegate.loopStart != loopStart ||
         oldDelegate.loopEnd != loopEnd ||
@@ -388,6 +497,7 @@ class WaveformView extends StatefulWidget {
     this.bpm = 0,
     this.rate = 1,
     this.scrollRate,
+    this.style = WaveStyle.solid,
     this.loopEnabled = false,
     this.loopStart = 0,
     this.loopEnd = 0,
@@ -395,6 +505,7 @@ class WaveformView extends StatefulWidget {
     this.onOverviewSeek,
   });
 
+  final WaveStyle style;
   final Float32List min;
   final Float32List max;
   final double position;
@@ -532,6 +643,7 @@ class _WaveformViewState extends State<WaveformView>
             color: w0.color,
             peak: _peak,
             palette: palette,
+            style: w0.style,
             loopEnabled: w0.loopEnabled,
             loopStart: w0.loopStart,
             loopEnd: w0.loopEnd,
