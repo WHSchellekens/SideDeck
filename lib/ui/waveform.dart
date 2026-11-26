@@ -21,13 +21,15 @@ class WaveformPainter extends CustomPainter {
     required this.palette,
     this.style = WaveStyle.solid,
     Float32List? tone,
+    Float32List? overviewBands,
     this.rate = 1,
     this.loopEnabled = false,
     this.loopStart = 0,
     this.loopEnd = 0,
     this.zoomWindowSec = 8,
     this.showJumpZone = false,
-  }) : tone = tone ?? Float32List(0);
+  }) : tone = tone ?? Float32List(0),
+       overviewBands = overviewBands ?? Float32List(0);
 
   final Float32List min;
   final Float32List max;
@@ -43,6 +45,9 @@ class WaveformPainter extends CustomPainter {
   /// Per waveform bin, 0..1: how bass-heavy it is compared with the rest of
   /// the track. Lights the waveform where the kicks are. Empty: by loudness.
   final Float32List tone;
+  /// Overview columns on a 3 px pitch, three values each (low, mid, high),
+  /// 0..1 against this track's own range. Empty: peaks, as before.
+  final Float32List overviewBands;
   /// Playback rate (file seconds per heard second). Zooms the scrolling
   /// waveform in heard-time so synced decks share a beat grid.
   final double rate;
@@ -54,7 +59,7 @@ class WaveformPainter extends CustomPainter {
 
   /// Share of the lane a full-scale waveform fills, top to bottom.
   static const waveHeight = 0.70;
-  static const overviewH = 16.0;
+  static const overviewH = 24.0;
   static const jumpHalf = 0.14;
   static const _cell = 12.0;
 
@@ -290,13 +295,36 @@ class WaveformPainter extends CustomPainter {
       Rect.fromLTWH(0, 0, size.width, overviewH),
       Paint()..color = palette.stripBg,
     );
-    final bars = Paint()..color = palette.stripBars;
-    for (var px = 0.0; px < size.width; px += 3) {
-      final t0 = (px / size.width) * duration;
-      final t1 = ((px + 3) / size.width) * duration;
-      final amp = _peakInRange(t0, t1, n, duration, peak).clamp(0.0, 1.0);
-      final h = math.max(1.0, amp * (overviewH - 6));
-      canvas.drawRect(Rect.fromLTWH(px, overviewH - 2 - h, 2, h), bars);
+    final cols = overviewBands.length ~/ 3;
+    if (cols > 0) {
+      // Three bands stacked: low (bone) carries the kicks and bass, so drops
+      // stand tall and breakdowns shrink to their mids and highs.
+      const avail = overviewH - 4;
+      final low = Paint()..color = palette.text;
+      final midP = Paint()..color = palette.muted;
+      final high = Paint()..color = palette.played;
+      final pitch = size.width / cols;
+      for (var c = 0; c < cols; c++) {
+        final x = c * pitch;
+        var y = overviewH - 2;
+        final lh = overviewBands[c * 3] * avail * 0.5;
+        final mh = overviewBands[c * 3 + 1] * avail * 0.3;
+        final hh = overviewBands[c * 3 + 2] * avail * 0.2;
+        if (lh > 0) canvas.drawRect(Rect.fromLTWH(x, y - lh, pitch * 0.7, lh), low);
+        y -= lh;
+        if (mh > 0) canvas.drawRect(Rect.fromLTWH(x, y - mh, pitch * 0.7, mh), midP);
+        y -= mh;
+        if (hh > 0) canvas.drawRect(Rect.fromLTWH(x, y - hh, pitch * 0.7, hh), high);
+      }
+    } else {
+      final bars = Paint()..color = palette.stripBars;
+      for (var px = 0.0; px < size.width; px += 3) {
+        final t0 = (px / size.width) * duration;
+        final t1 = ((px + 3) / size.width) * duration;
+        final amp = _peakInRange(t0, t1, n, duration, peak).clamp(0.0, 1.0);
+        final h = math.max(1.0, amp * (overviewH - 6));
+        canvas.drawRect(Rect.fromLTWH(px, overviewH - 2 - h, 2, h), bars);
+      }
     }
     final winL = ((viewStart / duration) * size.width).clamp(0.0, size.width);
     final winR = ((viewEnd / duration) * size.width).clamp(0.0, size.width);
@@ -526,6 +554,7 @@ class WaveformPainter extends CustomPainter {
         oldDelegate.palette != palette ||
         oldDelegate.style != style ||
         oldDelegate.tone != tone ||
+        oldDelegate.overviewBands != overviewBands ||
         oldDelegate.loopEnabled != loopEnabled ||
         oldDelegate.loopStart != loopStart ||
         oldDelegate.loopEnd != loopEnd ||
@@ -602,6 +631,11 @@ class _WaveformViewState extends State<WaveformView>
   Duration _now = Duration.zero;
   double _peak = 0.001;
   Float32List _tone = Float32List(0);
+  // Bands per bin, 0..1 against this track's own range, and the overview
+  // columns built from them for one width.
+  Float32List _lowN = Float32List(0), _midN = Float32List(0), _highN = Float32List(0);
+  Float32List _ovCols = Float32List(0);
+  int _ovColsFor = -1;
 
   static const _snapSec = 0.25;
   static const _easeSec = 0.1;
@@ -657,6 +691,8 @@ class _WaveformViewState extends State<WaveformView>
   /// full. So kicks light up whatever the genre or mastering.
   void _refreshTone() {
     final lo = widget.low, mi = widget.mid, hi = widget.high;
+    _lowN = _midN = _highN = Float32List(0);
+    _ovColsFor = -1;
     if (lo == null || mi == null || hi == null) {
       _tone = Float32List(0);
       return;
@@ -691,6 +727,51 @@ class _WaveformViewState extends State<WaveformView>
       tone[i] = ((share[i] - from) / span).clamp(0.0, 1.0).toDouble();
     }
     _tone = tone;
+
+    // Each band against its own 98th percentile (of the sounding part).
+    Float32List normalize(Float32List band) {
+      final vals = <double>[
+        for (var i = 0; i < n; i++)
+          if (sums[i] > loudest * 0.05) band[i],
+      ]..sort();
+      final top = math.max(1e-9, vals[math.min(vals.length - 1, (vals.length * 0.98).floor())]);
+      final out = Float32List(n);
+      for (var i = 0; i < n; i++) {
+        out[i] = (band[i] / top).clamp(0.0, 1.0).toDouble();
+      }
+      return out;
+    }
+
+    _lowN = normalize(lo);
+    _midN = normalize(mi);
+    _highN = normalize(hi);
+    _ovColsFor = -1;
+  }
+
+  /// Overview columns (3 px pitch): mean of each normalized band per column.
+  Float32List _overviewColumns(double width) {
+    final n = math.min(_lowN.length, math.min(_midN.length, _highN.length));
+    final cols = (width / 3).floor();
+    if (n == 0 || cols <= 0) return Float32List(0);
+    if (cols == _ovColsFor) return _ovCols;
+    final out = Float32List(cols * 3);
+    for (var c = 0; c < cols; c++) {
+      final i0 = (c * n / cols).floor();
+      final i1 = math.max(i0 + 1, ((c + 1) * n / cols).floor());
+      var l = 0.0, m = 0.0, h = 0.0;
+      for (var i = i0; i < i1; i++) {
+        l += _lowN[i];
+        m += _midN[i];
+        h += _highN[i];
+      }
+      final k = (i1 - i0).toDouble();
+      out[c * 3] = l / k;
+      out[c * 3 + 1] = m / k;
+      out[c * 3 + 2] = h / k;
+    }
+    _ovCols = out;
+    _ovColsFor = cols;
+    return out;
   }
 
   void _syncTicker() {
@@ -749,6 +830,7 @@ class _WaveformViewState extends State<WaveformView>
             palette: palette,
             style: w0.style,
             tone: _tone,
+            overviewBands: _overviewColumns(w),
             loopEnabled: w0.loopEnabled,
             loopStart: w0.loopStart,
             loopEnd: w0.loopEnd,
