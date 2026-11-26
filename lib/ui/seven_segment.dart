@@ -8,10 +8,13 @@ class SevenSegmentText extends StatelessWidget {
     super.key,
     required this.color,
     required this.height,
+    this.ghost,
   });
 
   final String text;
   final Color color;
+  /// Unlit segments, like an LCD; null draws only the lit ones.
+  final Color? ghost;
   /// Digit height in logical pixels.
   final double height;
 
@@ -19,16 +22,17 @@ class SevenSegmentText extends StatelessWidget {
   Widget build(BuildContext context) {
     return CustomPaint(
       size: Size(SevenSegmentPainter.widthFor(text, height), height),
-      painter: SevenSegmentPainter(text, color),
+      painter: SevenSegmentPainter(text, color, ghost: ghost),
     );
   }
 }
 
 class SevenSegmentPainter extends CustomPainter {
-  SevenSegmentPainter(this.text, this.color);
+  SevenSegmentPainter(this.text, this.color, {this.ghost});
 
   final String text;
   final Color color;
+  final Color? ghost;
 
   static const _digits = {
     '0': 'abcdef',
@@ -75,6 +79,7 @@ class SevenSegmentPainter extends CustomPainter {
     final m = th * 0.22; // gap where segments meet
     final hh = h / 2;
     final paint = Paint()..color = color;
+    final ghostPaint = ghost == null ? null : (Paint()..color = ghost!);
     canvas.save();
     // Lean the digits: x moves by slant * (h - y), so the tops lean right.
     canvas.translate(h * _slant, 0);
@@ -91,7 +96,8 @@ class SevenSegmentPainter extends CustomPainter {
       digits++;
       final segs = _digits[ch] ?? '';
       final path = Path();
-      void horiz(double y) => path.addPolygon([
+      final unlit = Path();
+      void horiz(Path into, double y) => into.addPolygon([
             Offset(x + t + m, y),
             Offset(x + th + m, y - t),
             Offset(x + w - th - m, y - t),
@@ -99,7 +105,7 @@ class SevenSegmentPainter extends CustomPainter {
             Offset(x + w - th - m, y + t),
             Offset(x + th + m, y + t),
           ], true);
-      void vert(double cx, double y0, double y1) => path.addPolygon([
+      void vert(Path into, double cx, double y0, double y1) => into.addPolygon([
             Offset(cx, y0),
             Offset(cx + t, y0 + t),
             Offset(cx + t, y1 - t),
@@ -107,13 +113,15 @@ class SevenSegmentPainter extends CustomPainter {
             Offset(cx - t, y1 - t),
             Offset(cx - t, y0 + t),
           ], true);
-      if (segs.contains('a')) horiz(t);
-      if (segs.contains('g')) horiz(hh);
-      if (segs.contains('d')) horiz(h - t);
-      if (segs.contains('f')) vert(x + t, t + m, hh - m);
-      if (segs.contains('b')) vert(x + w - t, t + m, hh - m);
-      if (segs.contains('e')) vert(x + t, hh + m, h - t - m);
-      if (segs.contains('c')) vert(x + w - t, hh + m, h - t - m);
+      Path pick(String seg) => segs.contains(seg) ? path : unlit;
+      horiz(pick('a'), t);
+      horiz(pick('g'), hh);
+      horiz(pick('d'), h - t);
+      vert(pick('f'), x + t, t + m, hh - m);
+      vert(pick('b'), x + w - t, t + m, hh - m);
+      vert(pick('e'), x + t, hh + m, h - t - m);
+      vert(pick('c'), x + w - t, hh + m, h - t - m);
+      if (ghostPaint != null) canvas.drawPath(unlit, ghostPaint);
       canvas.drawPath(path, paint);
       x += w;
     }
@@ -122,5 +130,5 @@ class SevenSegmentPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SevenSegmentPainter old) =>
-      old.text != text || old.color != color;
+      old.text != text || old.color != color || old.ghost != ghost;
 }

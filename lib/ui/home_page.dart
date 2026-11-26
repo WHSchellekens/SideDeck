@@ -537,7 +537,7 @@ class _HomePageState extends State<HomePage> {
       );
     }
     final title = d.artist.isEmpty ? d.title : '${d.title} — ${d.artist}';
-    return Text.rich(
+    final text = Text.rich(
       TextSpan(
         children: [
           TextSpan(
@@ -550,7 +550,9 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           TextSpan(
-            text: '   ${_bpmLabel(d)}   ${formatKey(d.key)}   −${formatDuration(remaining)}',
+            // The track's own BPM by the key; what you hear is on the LCD.
+            text: '   ${d.bpm > 1 ? '${d.bpm.toStringAsFixed(1)} BPM' : '— BPM'}'
+                '   ${formatKey(d.key)}   −${formatDuration(remaining)}',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
@@ -567,14 +569,33 @@ class _HomePageState extends State<HomePage> {
         fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );
+    return Row(
+      children: [
+        _tempoLcd(d),
+        const SizedBox(width: 10),
+        Expanded(child: text),
+      ],
+    );
   }
 
-  String _bpmLabel(DeckState d) {
-    final heard = d.bpm * d.rate;
-    if ((d.rate - 1.0).abs() < 0.002) {
-      return '${d.bpm.toStringAsFixed(1)} BPM';
-    }
-    return '${heard.toStringAsFixed(1)} BPM  (${d.bpm.toStringAsFixed(1)})';
+  /// The tempo you hear, on a small LCD like the Sidekick's own BPM readout:
+  /// segment digits only where there is a screen. Black glass in both themes.
+  Widget _tempoLcd(DeckState d) {
+    final heard = d.bpm > 1 ? (d.bpm * d.rate).toStringAsFixed(1) : '—';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0xFF2A1208)),
+      ),
+      child: SevenSegmentText(
+        heard.padLeft(5),
+        color: SideDeckTheme.lit,
+        ghost: SideDeckTheme.ember.withValues(alpha: 0.45),
+        height: 17,
+      ),
+    );
   }
 
   /// Play/pause starts on finger-up (tap), on purpose.
@@ -813,8 +834,6 @@ class _HomePageState extends State<HomePage> {
 
   Widget _waveBpm(int deck, SideDeckColors pal, {required double size}) {
     final d = _djReady.deck(deck);
-    final heard = d.bpm * d.rate;
-    final bpmLabel = d.bpm > 1 ? heard.toStringAsFixed(1) : '—';
     final labelStyle = _wavePadLabelStyle(size, pal.pillText);
     final onText = d.synced ? Colors.black : pal.pillText;
     return Row(
@@ -841,20 +860,15 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // The Sidekick's 7-segment BPM, only here on the SYNC pad.
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: size * 0.08),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: SevenSegmentText(
-                      bpmLabel,
-                      color: onText,
-                      height: size * 0.3,
-                    ),
+                Text(
+                  'SYNC',
+                  style: TextStyle(
+                    fontSize: size * 0.2,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    color: onText,
                   ),
                 ),
-                SizedBox(height: size * 0.06),
-                _padCaption('SYNC', size, onText),
               ],
             ),
           ),
