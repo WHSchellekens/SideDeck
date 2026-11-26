@@ -37,6 +37,18 @@ DJ_FFI_EXPORT void dj_play(DjEngine engine, int deck, int playing);
  *  next render callback, so it is sample-accurate and independent of output latency. */
 DJ_FFI_EXPORT void dj_set_quantize(DjEngine engine, int enabled);
 DJ_FFI_EXPORT int dj_get_quantize(DjEngine engine);
+
+/** On-air detection (external mixer): compares what each deck sends with the mixer's
+ *  master return on USB inputs 7-8 (fed by the Android capture thread). Share of the
+ *  master explained by a deck, 0..1, or -1 while unknown; lag is the render-to-capture
+ *  delay in ms (phone to mixer and back into the phone), -1 until found. */
+DJ_FFI_EXPORT void dj_onair_enable(DjEngine engine, int enabled);
+DJ_FFI_EXPORT float dj_onair_share(DjEngine engine, int deck);
+DJ_FFI_EXPORT float dj_onair_lag_ms(DjEngine engine);
+DJ_FFI_EXPORT float dj_onair_fit(DjEngine engine);
+/** Captured USB input channels and their peak levels (0..1), for the check screen. */
+DJ_FFI_EXPORT int dj_input_channels(DjEngine engine);
+DJ_FFI_EXPORT float dj_input_level(DjEngine engine, int channel);
 DJ_FFI_EXPORT void dj_seek(DjEngine engine, int deck, double seconds);
 DJ_FFI_EXPORT void dj_set_cue(DjEngine engine, int deck);
 DJ_FFI_EXPORT void dj_jump_cue(DjEngine engine, int deck);

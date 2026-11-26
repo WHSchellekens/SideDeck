@@ -4,6 +4,7 @@
 #include "biquad.hpp"
 #include "id3_meta.hpp"
 #include "last_error.hpp"
+#include "onair.hpp"
 #include "quantize.hpp"
 
 #include "log.hpp"
@@ -25,6 +26,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <time.h>
 #include <vector>
 
 #ifdef __ANDROID__
@@ -63,6 +65,14 @@ constexpr float kFilterMaxHz = 22050.0f;
 constexpr float kXfaderTransform = 1.0f;
 
 inline float clamp01(float v) { return std::max(0.0f, std::min(1.0f, v)); }
+
+// CLOCK_MONOTONIC in ns: the clock Java's System.nanoTime() and AudioTimestamp
+// (TIMEBASE_MONOTONIC) use, so render and capture times line up.
+inline int64_t monotonicNs() {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
 
 // Isolator fader: 0 = kill, 1 = unity, 4 = +12 dB.
 inline float eqBandGain(float db) {
@@ -483,6 +493,8 @@ struct Engine {
   std::atomic<bool> reconnecting{false};
   std::atomic<bool> managingStream{false};
   std::vector<float> mixAL, mixAR, mixBL, mixBR;
+  // On-air detection from the external mixer's master return (USB inputs 7-8).
+  onair::Tracker onAir;
 
   Engine() {
 #ifdef __APPLE__
@@ -963,9 +975,14 @@ struct Engine {
       return;
     }
     const int n = std::min(frames, kMaxCallbackFrames);
+    const bool tracking = onAir.enabled();
+    const int64_t renderNs = tracking ? monotonicNs() : 0;
     applyPendingQuantize();
     renderDeck(decks[0], mixAL.data(), mixAR.data(), n);
     renderDeck(decks[1], mixBL.data(), mixBR.data(), n);
+    if (tracking) {
+      onAir.feedDecks(mixAL.data(), mixAR.data(), mixBL.data(), mixBR.data(), n, renderNs);
+    }
 
     const float x = xfader.load();
     float gainA = 1.0f;
@@ -1321,6 +1338,32 @@ void dj_set_quantize(DjEngine engine, int enabled) {
 
 int dj_get_quantize(DjEngine engine) { return asEngine(engine)->quantizeOn.load() ? 1 : 0; }
 
+void dj_onair_enable(DjEngine engine, int enabled) {
+  auto* e = asEngine(engine);
+  if (enabled != 0) {
+    e->onAir.enable((float)e->engineSampleRate.load());
+  } else {
+    e->onAir.disable();
+  }
+}
+
+float dj_onair_share(DjEngine engine, int deck) {
+  if (deck < 0 || deck > 1) {
+    return -1.0f;
+  }
+  return asEngine(engine)->onAir.share(deck);
+}
+
+float dj_onair_lag_ms(DjEngine engine) { return asEngine(engine)->onAir.lagMs(); }
+
+float dj_onair_fit(DjEngine engine) { return asEngine(engine)->onAir.fit(); }
+
+int dj_input_channels(DjEngine engine) { return asEngine(engine)->onAir.inputChannels(); }
+
+float dj_input_level(DjEngine engine, int channel) {
+  return asEngine(engine)->onAir.inputLevel(channel);
+}
+
 void dj_seek(DjEngine engine, int deck, double seconds) {
   if (deck < 0 || deck > 1) {
     return;
@@ -1614,5 +1657,21 @@ Java_es_manifold_sidedeck_UsbPlayer_usbRender(JNIEnv* env, jclass, jlong handle,
     return;
   }
   asEngine(reinterpret_cast<DjEngine>(handle))->renderInterleaved(buf, (int)frames, (int)channels);
+}
+
+// The Sidekick's USB inputs (7-8 carry its master output), read by
+// SidekickLink's capture thread. endTimeNs: capture time of the last frame.
+extern "C" JNIEXPORT void JNICALL
+Java_es_manifold_sidedeck_SidekickLink_usbCapture(JNIEnv* env, jclass, jlong handle, jobject jbuf,
+                                                  jint frames, jint channels, jlong endTimeNs) {
+  if (handle == 0 || jbuf == nullptr || frames <= 0 || channels <= 0) {
+    return;
+  }
+  const auto* buf = static_cast<const float*>(env->GetDirectBufferAddress(jbuf));
+  if (buf == nullptr) {
+    return;
+  }
+  asEngine(reinterpret_cast<DjEngine>(handle))
+      ->onAir.feedCapture(buf, (int)frames, (int)channels, (int64_t)endTimeNs);
 }
 #endif
