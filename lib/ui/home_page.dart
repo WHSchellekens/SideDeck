@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sidedeck/engine/music_utils.dart';
@@ -384,17 +386,28 @@ class _HomePageState extends State<HomePage> {
           builder: (context, constraints) {
             final overview = WaveformPainter.overviewH;
             const pad = _overlayPad;
-            final play = d.loaded
+            var play = d.loaded
                 ? (constraints.maxHeight - overview - 6).clamp(40.0, 120.0)
                 : 0.0;
             final w = constraints.maxWidth;
             // Shrink pads so BPM cluster + nudges fit the side strip (no min floor
             // that would reintroduce overlap on very narrow widths).
             final side = w * (0.5 - WaveformPainter.jumpHalf);
-            final padSize = ((side - pad - 3 * _wavePadGap) / 5).clamp(
+            var padSize = ((side - pad - 3 * _wavePadGap) / 5).clamp(
               1.0,
               _wavePadSize,
             );
+            // The three loop pads sit between the play button and the jump
+            // zone. Where they don't fit (narrow decks, e.g. beside the rail),
+            // the play button gives way first, down to 64, then the pads.
+            final loopRoom = WaveformPainter.jumpZoneLeft(w) - pad;
+            final loopNeeds = 3 * padSize + 2 * _wavePadGap;
+            if (d.loaded && play + loopNeeds > loopRoom) {
+              play = math.max(math.min(play, 64.0), loopRoom - loopNeeds);
+              padSize = ((loopRoom - play - 2 * _wavePadGap) / 3)
+                  .floorToDouble()
+                  .clamp(1.0, padSize);
+            }
             final playFoot = pad + play;
             final nudgeFoot = pad + padSize * 2 + _wavePadGap;
             final loopGap = WaveformPainter.jumpZoneLeft(w) - playFoot;
