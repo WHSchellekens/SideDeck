@@ -8,6 +8,7 @@ import 'package:sidedeck/theme/sidedeck_theme.dart';
 import 'package:sidedeck/ui/library_drawer.dart';
 import 'package:sidedeck/ui/mixer_strip.dart';
 import 'package:sidedeck/ui/settings_page.dart';
+import 'package:sidedeck/ui/seven_segment.dart';
 import 'package:sidedeck/ui/waveform.dart';
 
 class HomePage extends StatefulWidget {
@@ -106,7 +107,6 @@ class _HomePageState extends State<HomePage> {
       builder: (ctx) {
         _mixerDialogContext = ctx;
         return AlertDialog(
-          backgroundColor: SideDeckTheme.panel,
           title: Text('${offer.label} detected'),
           content: const Text(
             'Enable external mixer mode? Deck A and Deck B go out as '
@@ -199,19 +199,19 @@ class _HomePageState extends State<HomePage> {
 
     final dj = _djReady;
     final library = _library!;
+    final pal = SideDeckColors.of(context);
     return AnimatedBuilder(
       animation: Listenable.merge([dj, library]),
       builder: (context, _) {
         return Scaffold(
-          // Match mixer so L/R (and home-indicator) safe-area gutters aren't black.
-          backgroundColor: SideDeckTheme.panel,
+          backgroundColor: pal.bg,
           body: SafeArea(
             child: ColoredBox(
-              color: Colors.black,
+              color: pal.bg,
               child: Column(
                 children: [
-                  Expanded(flex: 5, child: _waveDeck(0, SideDeckTheme.accentA)),
-                  Expanded(flex: 5, child: _waveDeck(1, SideDeckTheme.accentB)),
+                  Expanded(flex: 5, child: _waveDeck(0)),
+                  Expanded(flex: 5, child: _waveDeck(1)),
                   if (dj.externalMixer)
                     _mixerBar()
                   else
@@ -245,12 +245,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _waveDeck(int i, Color accent) {
+  Widget _waveDeck(int i) {
+    final pal = SideDeckColors.of(context);
+    final deckColor = pal.deck(i);
     final d = _djReady.deck(i);
     final remaining = (d.duration - d.position).clamp(0.0, 99999.0);
-    final info = d.loaded
-        ? '${d.title}   ${_bpmLabel(d)}   ${formatKey(d.key)}   −${formatDuration(remaining)}'
-        : 'Deck ${i == 0 ? 'A' : 'B'} — tap to load a track';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
@@ -288,7 +287,7 @@ class _HomePageState extends State<HomePage> {
                   bpm: d.bpm,
                   rate: d.rate,
                   scrollRate: _djReady.effectiveRate(i),
-                  color: accent,
+                  color: deckColor,
                   loopEnabled: d.loopEnabled,
                   loopStart: d.loopStart,
                   loopEnd: d.loopEnd,
@@ -303,32 +302,17 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 Positioned(
-                  left: play + 8,
-                  right: d.loaded ? 88 : 8,
-                  top: overview + 3,
-                  child: IgnorePointer(
-                    child: Text(
-                      info,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 11,
-                        color: d.loaded ? Colors.white : SideDeckTheme.muted,
-                        shadows: const [
-                          Shadow(color: Colors.black, blurRadius: 6),
-                          Shadow(color: Colors.black, blurRadius: 12),
-                        ],
-                      ),
-                    ),
-                  ),
+                  left: play + 12,
+                  right: d.loaded ? 104 : 8,
+                  top: overview + 5,
+                  child: IgnorePointer(child: _info(i, d, remaining, pal)),
                 ),
                 if (d.loaded)
                   Positioned(
                     left: pad,
                     top: overview,
                     bottom: 0,
-                    child: Center(child: _play(i, d.playing, accent, play)),
+                    child: Center(child: _play(i, d.playing, play, pal)),
                   ),
                 if (d.loaded)
                   Positioned(
@@ -337,19 +321,9 @@ class _HomePageState extends State<HomePage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _holdNudge(
-                          i,
-                          faster: false,
-                          accent: accent,
-                          size: padSize,
-                        ),
+                        _holdNudge(i, faster: false, size: padSize, pal: pal),
                         SizedBox(width: _wavePadGap),
-                        _holdNudge(
-                          i,
-                          faster: true,
-                          accent: accent,
-                          size: padSize,
-                        ),
+                        _holdNudge(i, faster: true, size: padSize, pal: pal),
                       ],
                     ),
                   ),
@@ -363,15 +337,22 @@ class _HomePageState extends State<HomePage> {
                 if (d.loaded)
                   Positioned(
                     right: 4,
-                    top: overview + 2,
-                    child: _gridButton(i, accent),
+                    top: overview + 4,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _deckTag(i, deckColor),
+                        const SizedBox(width: 6),
+                        _gridButton(i, pal),
+                      ],
+                    ),
                   ),
                 if (d.loaded && _gridEditDeck == i)
                   Positioned(
                     left: play + 8,
                     right: nudgeFoot,
                     bottom: 4,
-                    child: _gridEditorBar(i, accent),
+                    child: _gridEditorBar(i, pal),
                   ),
                 if (d.loaded && _gridEditDeck != i && loopGap > 0)
                   Positioned(
@@ -379,7 +360,7 @@ class _HomePageState extends State<HomePage> {
                     width: loopGap,
                     bottom: pad,
                     child: Center(
-                      child: _waveLoop(i, accent, size: padSize),
+                      child: _waveLoop(i, pal, size: padSize),
                     ),
                   ),
                 if (d.loaded && _gridEditDeck != i && bpmGap > 0)
@@ -388,13 +369,69 @@ class _HomePageState extends State<HomePage> {
                     width: bpmGap,
                     bottom: pad,
                     child: Center(
-                      child: _waveBpm(i, accent, size: padSize),
+                      child: _waveBpm(i, pal, size: padSize),
                     ),
                   ),
               ],
             );
           },
         ),
+      ),
+    );
+  }
+
+  /// Title in capitals like the Sidekick's screen; BPM, key and time after it
+  /// in the same face.
+  Widget _info(int i, DeckState d, double remaining, SideDeckColors pal) {
+    final shadows = pal.brightness == Brightness.dark
+        ? const [
+            Shadow(color: Colors.black, blurRadius: 6),
+            Shadow(color: Colors.black, blurRadius: 12),
+          ]
+        : const <Shadow>[];
+    if (!d.loaded) {
+      return Text(
+        'DECK ${i == 0 ? 'A' : 'B'} — TAP TO LOAD A TRACK',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.6,
+          color: pal.muted,
+          shadows: shadows,
+        ),
+      );
+    }
+    final title = d.artist.isEmpty ? d.title : '${d.title} — ${d.artist}';
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: title.toUpperCase(),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.6,
+              color: pal.text,
+            ),
+          ),
+          TextSpan(
+            text: '   ${_bpmLabel(d)}   ${formatKey(d.key)}   −${formatDuration(remaining)}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.4,
+              color: pal.muted,
+            ),
+          ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        shadows: shadows,
+        fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );
   }
@@ -407,11 +444,17 @@ class _HomePageState extends State<HomePage> {
     return '${heard.toStringAsFixed(1)} BPM  (${d.bpm.toStringAsFixed(1)})';
   }
 
-  Widget _play(int i, bool playing, Color accent, double size) {
+  /// Play/pause starts on finger-up (tap), on purpose.
+  Widget _play(int i, bool playing, double size, SideDeckColors pal) {
     return Material(
-      color: accent.withValues(alpha: 0.55),
-      shape: const CircleBorder(),
-      elevation: 0,
+      color: pal.text.withValues(alpha: 0.07),
+      shape: CircleBorder(
+        side: BorderSide(
+          color: playing ? pal.lit : pal.muted.withValues(alpha: 0.5),
+          width: 2,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: () => _djReady.playPause(i),
@@ -420,37 +463,53 @@ class _HomePageState extends State<HomePage> {
           height: size,
           child: Icon(
             playing ? Icons.pause : Icons.play_arrow,
-            color: Colors.white.withValues(alpha: 0.9),
-            size: size * 0.55,
+            color: pal.text,
+            size: size * 0.5,
           ),
         ),
       ),
     );
   }
 
-  Widget _gridButton(int deck, Color accent) {
+  Widget _deckTag(int i, Color deckColor) {
+    return Container(
+      width: 26,
+      height: 26,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: deckColor,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        i == 0 ? 'A' : 'B',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: deckColor.computeLuminance() > 0.2 ? Colors.black : Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget _gridButton(int deck, SideDeckColors pal) {
     final on = _gridEditDeck == deck;
     return Material(
-      color: on ? accent : const Color(0xCC111111),
+      color: on ? pal.lit : pal.unlit,
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
         onTap: () => setState(() => _gridEditDeck = on ? null : deck),
         borderRadius: BorderRadius.circular(6),
         child: Container(
-          height: 32,
+          height: 26,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: accent.withValues(alpha: 0.85)),
-          ),
           child: Text(
             'GRID',
             style: TextStyle(
               fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-              color: on ? Colors.black : accent,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+              color: on ? Colors.black : pal.pillText,
             ),
           ),
         ),
@@ -458,7 +517,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _gridEditorBar(int deck, Color accent) {
+  Widget _gridEditorBar(int deck, SideDeckColors pal) {
     Widget step(String label, VoidCallback onStep) {
       return HoldRepeatButton(
         onStep: onStep,
@@ -467,16 +526,16 @@ class _HomePageState extends State<HomePage> {
           height: 40,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: SideDeckTheme.panelAlt,
+            color: pal.unlit,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: accent.withValues(alpha: 0.8)),
           ),
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 20,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               height: 1,
+              color: pal.pillText,
             ),
           ),
         ),
@@ -491,8 +550,8 @@ class _HomePageState extends State<HomePage> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
-              caption,
-              style: const TextStyle(fontSize: 11, color: SideDeckTheme.muted),
+              caption.toUpperCase(),
+              style: TextStyle(fontSize: 11, letterSpacing: 0.6, color: pal.muted),
             ),
           ),
           right,
@@ -501,7 +560,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     return Material(
-      color: const Color(0xE0111111),
+      color: pal.panel.withValues(alpha: 0.92),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -528,7 +587,7 @@ class _HomePageState extends State<HomePage> {
   static const _wavePadSize = 56.0;
   static const _wavePadGap = 6.0;
 
-  Widget _waveLoop(int deck, Color accent, {required double size}) {
+  Widget _waveLoop(int deck, SideDeckColors pal, {required double size}) {
     final d = _djReady.deck(deck);
     final beats = d.loopBars * 4;
     final beatsLabel = (beats - beats.round()).abs() < 0.05
@@ -536,7 +595,8 @@ class _HomePageState extends State<HomePage> {
         : beats.toStringAsFixed(1);
     final canHalf = beats > DjController.loopBeats.first + 0.05;
     final canDouble = beats < DjController.loopBeats.last - 0.05;
-    final labelStyle = _wavePadLabelStyle(size);
+    final labelStyle = _wavePadLabelStyle(size, pal.pillText);
+    final onText = d.loopEnabled ? Colors.black : pal.pillText;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -544,7 +604,7 @@ class _HomePageState extends State<HomePage> {
           enabled: canHalf,
           onStep: () => _djReady.halfLoop(deck),
           child: _wavePad(
-            accent,
+            pal,
             size: size,
             child: Text('½', style: labelStyle),
           ),
@@ -557,7 +617,7 @@ class _HomePageState extends State<HomePage> {
             d.loopBars == 0 ? 1 : d.loopBars,
           ),
           child: _wavePad(
-            accent,
+            pal,
             size: size,
             filled: d.loopEnabled,
             child: Column(
@@ -571,21 +631,13 @@ class _HomePageState extends State<HomePage> {
                     softWrap: false,
                     style: TextStyle(
                       fontSize: size * 0.32,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w700,
                       height: 1,
-                      color: d.loopEnabled ? Colors.black : Colors.white,
+                      color: onText,
                     ),
                   ),
                 ),
-                Text(
-                  'LOOP',
-                  style: TextStyle(
-                    fontSize: size * 0.16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                    color: d.loopEnabled ? Colors.black : accent,
-                  ),
-                ),
+                _padCaption('LOOP', size, onText),
               ],
             ),
           ),
@@ -595,7 +647,7 @@ class _HomePageState extends State<HomePage> {
           enabled: canDouble,
           onStep: () => _djReady.doubleLoop(deck),
           child: _wavePad(
-            accent,
+            pal,
             size: size,
             child: Text('×2', style: labelStyle),
           ),
@@ -604,11 +656,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _waveBpm(int deck, Color accent, {required double size}) {
+  Widget _waveBpm(int deck, SideDeckColors pal, {required double size}) {
     final d = _djReady.deck(deck);
     final heard = d.bpm * d.rate;
     final bpmLabel = d.bpm > 1 ? heard.toStringAsFixed(1) : '—';
-    final labelStyle = _wavePadLabelStyle(size);
+    final labelStyle = _wavePadLabelStyle(size, pal.pillText);
+    final onText = d.synced ? Colors.black : pal.pillText;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -616,7 +669,7 @@ class _HomePageState extends State<HomePage> {
           enabled: d.loaded && d.bpm > 1,
           onStep: () => _djReady.nudgeBpm(deck, -0.1),
           child: _wavePad(
-            accent,
+            pal,
             size: size,
             child: Text('−', style: labelStyle),
           ),
@@ -627,36 +680,26 @@ class _HomePageState extends State<HomePage> {
               ? () => _djReady.sync(deck)
               : null,
           child: _wavePad(
-            accent,
+            pal,
             size: size,
             filled: d.synced,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    bpmLabel,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontSize: size * 0.26,
-                      fontWeight: FontWeight.w800,
-                      height: 1,
-                      color: d.synced ? Colors.black : Colors.white,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                // The Sidekick's 7-segment BPM, only here on the SYNC pad.
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: size * 0.08),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: SevenSegmentText(
+                      bpmLabel,
+                      color: onText,
+                      height: size * 0.3,
                     ),
                   ),
                 ),
-                Text(
-                  'SYNC',
-                  style: TextStyle(
-                    fontSize: size * 0.16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                    color: d.synced ? Colors.black : accent,
-                  ),
-                ),
+                SizedBox(height: size * 0.06),
+                _padCaption('SYNC', size, onText),
               ],
             ),
           ),
@@ -666,7 +709,7 @@ class _HomePageState extends State<HomePage> {
           enabled: d.loaded && d.bpm > 1,
           onStep: () => _djReady.nudgeBpm(deck, 0.1),
           child: _wavePad(
-            accent,
+            pal,
             size: size,
             child: Text('+', style: labelStyle),
           ),
@@ -675,14 +718,25 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  static TextStyle _wavePadLabelStyle(double size) => TextStyle(
+  static TextStyle _wavePadLabelStyle(double size, Color color) => TextStyle(
     fontSize: size * 0.32,
-    fontWeight: FontWeight.w800,
-    color: Colors.white,
+    fontWeight: FontWeight.w500,
+    color: color,
   );
 
+  static Widget _padCaption(String text, double size, Color color) => Text(
+    text,
+    style: TextStyle(
+      fontSize: size * 0.15,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.8,
+      color: color,
+    ),
+  );
+
+  /// Sidekick pill: ember when off, lit orange when on.
   Widget _wavePad(
-    Color accent, {
+    SideDeckColors pal, {
     required Widget child,
     required double size,
     bool filled = false,
@@ -692,11 +746,8 @@ class _HomePageState extends State<HomePage> {
       height: size,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: filled
-              ? accent.withValues(alpha: 0.9)
-              : const Color(0xCC111111),
+          color: filled ? pal.lit : pal.unlit,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: accent, width: 1.6),
         ),
         child: Center(child: child),
       ),
@@ -706,17 +757,17 @@ class _HomePageState extends State<HomePage> {
   Widget _holdNudge(
     int deck, {
     required bool faster,
-    required Color accent,
     required double size,
+    required SideDeckColors pal,
   }) {
     final on = _djReady.deck(deck).loaded;
-    final color = on ? Colors.white : SideDeckTheme.muted;
+    final color = on ? pal.pillText : pal.muted;
     return Listener(
       onPointerDown: on ? (_) => _djReady.startNudge(deck, faster: faster) : null,
       onPointerUp: on ? (_) => _djReady.endNudge(deck) : null,
       onPointerCancel: on ? (_) => _djReady.endNudge(deck) : null,
       child: _wavePad(
-        accent,
+        pal,
         size: size,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -726,15 +777,7 @@ class _HomePageState extends State<HomePage> {
               size: size * 0.39,
               color: color,
             ),
-            Text(
-              'NUDGE',
-              style: TextStyle(
-                fontSize: size * 0.16,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-                color: on ? accent : SideDeckTheme.muted,
-              ),
-            ),
+            _padCaption('NUDGE', size, color),
           ],
         ),
       ),

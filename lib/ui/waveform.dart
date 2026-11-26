@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:sidedeck/theme/sidedeck_theme.dart';
 
 /// Horizontal scrolling DJ waveform: playhead pinned center, regular beat grid.
 class WaveformPainter extends CustomPainter {
@@ -15,6 +16,7 @@ class WaveformPainter extends CustomPainter {
     required this.bpm,
     required this.color,
     required this.peak,
+    required this.palette,
     this.rate = 1,
     this.loopEnabled = false,
     this.loopStart = 0,
@@ -32,6 +34,7 @@ class WaveformPainter extends CustomPainter {
   final Color color;
   /// Max abs amplitude across [min]/[max]; computed once when the wave data changes.
   final double peak;
+  final SideDeckColors palette;
   /// Playback rate (file seconds per heard second). Zooms the scrolling
   /// waveform in heard-time so synced decks share a beat grid.
   final double rate;
@@ -41,18 +44,28 @@ class WaveformPainter extends CustomPainter {
   final double zoomWindowSec;
   final bool showJumpZone;
 
+  /// Share of the lane a full-scale waveform fills, top to bottom.
+  static const waveHeight = 0.70;
+  static const overviewH = 16.0;
+  static const jumpHalf = 0.14;
+  static const _cell = 12.0;
+
+  /// Left edge of the beat-jump hit rect; same math as [_drawJumpZone].
+  static double jumpZoneLeft(double width) => width * (0.5 - jumpHalf);
+
+  /// Right edge of the beat-jump hit rect.
+  static double jumpZoneRight(double width) => width * (0.5 + jumpHalf);
+
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF0A0C10));
+    canvas.drawRect(Offset.zero & size, Paint()..color = palette.screen);
 
     if (min.isEmpty || duration <= 0 || size.width <= 1 || size.height <= 1) {
       return;
     }
 
     final n = math.min(min.length, max.length);
-
-    const overviewH = WaveformPainter.overviewH;
-    final waveTop = overviewH;
+    const waveTop = overviewH;
     final waveH = size.height - overviewH;
     final mid = waveTop + waveH / 2;
 
@@ -66,80 +79,25 @@ class WaveformPainter extends CustomPainter {
 
     double xForTime(double t) => ((t - viewStart) / viewDur) * size.width;
 
-    for (var px = 0.0; px < size.width; px++) {
-      final t0 = (px / size.width) * duration;
-      final t1 = ((px + 1) / size.width) * duration;
-      final amp = _peakInRange(t0, t1, n, duration, peak);
-      final h = amp * (overviewH - 2);
-      final y0 = (overviewH - h) / 2;
-      canvas.drawRect(
-        Rect.fromLTWH(px, y0, 1.2, h.clamp(1, overviewH)),
-        Paint()..color = _ampColor(color, amp).withValues(alpha: 0.95),
-      );
-    }
-    final winL = (viewStart / duration) * size.width;
-    final winR = (viewEnd / duration) * size.width;
-    canvas.drawRect(
-      Rect.fromLTRB(winL.clamp(0, size.width), 0, winR.clamp(0, size.width), overviewH),
-      Paint()..color = Colors.white.withValues(alpha: 0.12),
-    );
-    _drawPlayhead(
-      canvas,
-      x: (position / duration) * size.width,
-      y0: 0,
-      y1: overviewH,
-      coreWidth: 2.4,
-      tick: true,
-    );
-    _drawLoopOverview(canvas, size, overviewH);
+    _drawCells(canvas, Rect.fromLTWH(0, waveTop, size.width, waveH));
+    _drawOverview(canvas, size, n, viewStart, viewEnd);
 
+    final half = waveH * waveHeight / 2;
+    final paint = Paint();
     for (var px = 0.0; px < size.width; px++) {
       final t0 = viewStart + (px / size.width) * viewDur;
       final t1 = viewStart + ((px + 1) / size.width) * viewDur;
       if (t1 <= 0 || t0 >= duration) continue;
       final loHi = _minMaxInRange(t0.clamp(0.0, duration), t1.clamp(0.0, duration), n, duration);
       final amp = math.max(loHi.$1.abs(), loHi.$2.abs()) / peak;
-      final yHi = mid - (loHi.$2.abs() / peak) * (waveH * 0.48);
-      final yLo = mid + (loHi.$1.abs() / peak) * (waveH * 0.48);
-      final h = (yLo - yHi).clamp(1.0, waveH);
-      canvas.drawRect(
-        Rect.fromLTWH(px, yHi, 1.05, h),
-        Paint()..color = _ampColor(color, amp),
-      );
+      final yHi = mid - (loHi.$2.abs() / peak) * half;
+      final yLo = mid + (loHi.$1.abs() / peak) * half;
+      paint.color = _ampColor(color, amp);
+      canvas.drawRect(Rect.fromLTWH(px, yHi, 1.05, (yLo - yHi).clamp(1.0, waveH)), paint);
     }
-
-    canvas.drawLine(
-      Offset(0, mid),
-      Offset(size.width, mid),
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.12)
-        ..strokeWidth = 1,
-    );
 
     // Grid on top of the wave so it stays visible.
-    final beatSec = bpm > 1 ? 60.0 / bpm : 0.0;
-    if (beatSec > 0.05) {
-      var t = beatOffset;
-      if (t > viewStart) {
-        t -= (((t - viewStart) / beatSec).ceil() * beatSec);
-      }
-      while (t < viewStart) {
-        t += beatSec;
-      }
-      for (; t <= viewEnd; t += beatSec) {
-        if (t < 0 || t > duration) continue;
-        final idx = ((t - beatOffset) / beatSec).round();
-        final phrase = idx % 32 == 0; // 8 bars
-        final bar = idx % 4 == 0;
-        final paint = Paint()
-          ..strokeWidth = phrase ? 2.0 : (bar ? 1.4 : 1.0)
-          ..color = phrase
-              ? const Color(0xFFFFF3B0).withValues(alpha: 0.72)
-              : Colors.white.withValues(alpha: bar ? 0.42 : 0.20);
-        canvas.drawLine(Offset(xForTime(t), waveTop), Offset(xForTime(t), size.height), paint);
-      }
-    }
-
+    _drawGrid(canvas, size, waveTop, viewStart, viewEnd, xForTime);
     _drawLoopZoomed(canvas, size, waveTop, xForTime);
 
     if (showJumpZone) {
@@ -152,12 +110,100 @@ class WaveformPainter extends CustomPainter {
       y0: waveTop,
       y1: size.height,
       coreWidth: 2.6,
-      tick: false,
     );
+    _marker(canvas, size.width / 2, waveTop, 6, 8);
   }
 
-  static const overviewH = 16.0;
-  static const _playhead = Color(0xFFF4F7FB);
+  /// The still cell grid of the Sidekick screen, behind everything.
+  void _drawCells(Canvas canvas, Rect r) {
+    final p = Paint()
+      ..color = palette.cellGrid
+      ..strokeWidth = 1;
+    for (var x = r.left + (r.width % _cell) / 2; x <= r.right; x += _cell) {
+      canvas.drawLine(Offset(x, r.top), Offset(x, r.bottom), p);
+    }
+    for (var y = r.top + (r.height % _cell) / 2; y <= r.bottom; y += _cell) {
+      canvas.drawLine(Offset(r.left, y), Offset(r.right, y), p);
+    }
+  }
+
+  /// Whole track in a black strip between two orange rules, like the strips
+  /// on the Sidekick's LOOP and SIREN screens.
+  void _drawOverview(Canvas canvas, Size size, int n, double viewStart, double viewEnd) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, overviewH),
+      Paint()..color = palette.stripBg,
+    );
+    final bars = Paint()..color = palette.stripBars;
+    for (var px = 0.0; px < size.width; px += 3) {
+      final t0 = (px / size.width) * duration;
+      final t1 = ((px + 3) / size.width) * duration;
+      final amp = _peakInRange(t0, t1, n, duration, peak).clamp(0.0, 1.0);
+      final h = math.max(1.0, amp * (overviewH - 6));
+      canvas.drawRect(Rect.fromLTWH(px, overviewH - 2 - h, 2, h), bars);
+    }
+    final winL = ((viewStart / duration) * size.width).clamp(0.0, size.width);
+    final winR = ((viewEnd / duration) * size.width).clamp(0.0, size.width);
+    canvas.drawRect(
+      Rect.fromLTRB(winL, 1, winR, overviewH - 1),
+      Paint()..color = palette.text.withValues(alpha: 0.13),
+    );
+    _drawLoopOverview(canvas, size);
+    final rule = Paint()..color = palette.lit;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, 1), rule);
+    canvas.drawRect(Rect.fromLTWH(0, overviewH - 1, size.width, 1), rule);
+    final x = (position / duration) * size.width;
+    canvas.drawRect(
+      Rect.fromLTWH(x - 0.6, 1, 1.2, overviewH - 2),
+      Paint()..color = palette.playhead,
+    );
+    _marker(canvas, x, 1, 4.5, 6, outline: false);
+  }
+
+  /// Grey line on every beat; orange on beat 1 of each 4-beat bar; thicker
+  /// orange with flags every 8 bars.
+  void _drawGrid(
+    Canvas canvas,
+    Size size,
+    double waveTop,
+    double viewStart,
+    double viewEnd,
+    double Function(double) xForTime,
+  ) {
+    final beatSec = bpm > 1 ? 60.0 / bpm : 0.0;
+    if (beatSec <= 0.05) return;
+    final beat = Paint()
+      ..color = palette.beatLine
+      ..strokeWidth = 1.2;
+    final halo = Paint()..color = palette.halo;
+    final bar = Paint()..color = palette.lit;
+    var t = beatOffset;
+    if (t > viewStart) {
+      t -= (((t - viewStart) / beatSec).ceil() * beatSec);
+    }
+    while (t < viewStart) {
+      t += beatSec;
+    }
+    for (; t <= viewEnd; t += beatSec) {
+      if (t < 0 || t > duration) continue;
+      final idx = ((t - beatOffset) / beatSec).round();
+      final x = xForTime(t);
+      if (idx % 4 != 0) {
+        canvas.drawLine(Offset(x, waveTop), Offset(x, size.height), beat);
+        continue;
+      }
+      final phrase = idx % 32 == 0; // 8 bars
+      final w = phrase ? 3.2 : 2.2;
+      halo.strokeWidth = w + 2;
+      bar.strokeWidth = w;
+      canvas.drawLine(Offset(x, waveTop), Offset(x, size.height), halo);
+      canvas.drawLine(Offset(x, waveTop), Offset(x, size.height), bar);
+      if (phrase) {
+        canvas.drawRect(Rect.fromLTWH(x - 3.5, waveTop, 7, 5), bar);
+        canvas.drawRect(Rect.fromLTWH(x - 3.5, size.height - 5, 7, 5), bar);
+      }
+    }
+  }
 
   void _drawPlayhead(
     Canvas canvas, {
@@ -165,43 +211,36 @@ class WaveformPainter extends CustomPainter {
     required double y0,
     required double y1,
     required double coreWidth,
-    required bool tick,
   }) {
     final halo = Paint()
-      ..color = const Color(0xE6000000)
+      ..color = palette.halo
       ..strokeWidth = coreWidth + 2.4
       ..strokeCap = StrokeCap.square;
     final core = Paint()
-      ..color = _playhead
+      ..color = palette.playhead
       ..strokeWidth = coreWidth
       ..strokeCap = StrokeCap.square;
     canvas.drawLine(Offset(x, y0), Offset(x, y1), halo);
     canvas.drawLine(Offset(x, y0), Offset(x, y1), core);
-    if (!tick) {
-      return;
-    }
-    final tri = Path()
-      ..moveTo(x, y1)
-      ..lineTo(x - 5.5, y0)
-      ..lineTo(x + 5.5, y0)
-      ..close();
-    canvas.drawPath(tri, Paint()..color = const Color(0xE6000000));
-    final inner = Path()
-      ..moveTo(x, y1 - 1)
-      ..lineTo(x - 4, y0 + 1)
-      ..lineTo(x + 4, y0 + 1)
-      ..close();
-    canvas.drawPath(inner, Paint()..color = _playhead);
   }
 
-  static const jumpHalf = 0.14;
-
-  /// Left edge of the beat-jump hit rect; same math as [_drawJumpZone].
-  static double jumpZoneLeft(double width) => width * (0.5 - jumpHalf);
-
-  /// Right edge of the beat-jump hit rect.
-  static double jumpZoneRight(double width) => width * (0.5 + jumpHalf);
-  static const _loopColor = Color(0xFF1DE9B6);
+  /// The Sidekick's orange ▼ position marker.
+  void _marker(Canvas canvas, double x, double top, double hw, double h, {bool outline = true}) {
+    if (outline) {
+      final o = Path()
+        ..moveTo(x - hw - 1.5, top)
+        ..lineTo(x + hw + 1.5, top)
+        ..lineTo(x, top + h + 2)
+        ..close();
+      canvas.drawPath(o, Paint()..color = palette.halo);
+    }
+    final p = Path()
+      ..moveTo(x - hw, top)
+      ..lineTo(x + hw, top)
+      ..lineTo(x, top + h)
+      ..close();
+    canvas.drawPath(p, Paint()..color = palette.lit);
+  }
 
   void _drawJumpZone(Canvas canvas, Size size, double waveTop) {
     final cx = size.width / 2;
@@ -210,10 +249,10 @@ class WaveformPainter extends CustomPainter {
     final right = cx + half;
     canvas.drawRect(
       Rect.fromLTRB(left, waveTop, right, size.height),
-      Paint()..color = Colors.white.withValues(alpha: 0.06),
+      Paint()..color = palette.text.withValues(alpha: 0.03),
     );
     final edge = Paint()
-      ..color = Colors.white.withValues(alpha: 0.22)
+      ..color = palette.text.withValues(alpha: 0.12)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(left, waveTop), Offset(left, size.height), edge);
     canvas.drawLine(Offset(right, waveTop), Offset(right, size.height), edge);
@@ -227,7 +266,7 @@ class WaveformPainter extends CustomPainter {
 
   void _chevron(Canvas canvas, Offset c, {required bool left}) {
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.55)
+      ..color = palette.text.withValues(alpha: 0.45)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..strokeJoin = StrokeJoin.round;
@@ -244,9 +283,10 @@ class WaveformPainter extends CustomPainter {
       text: TextSpan(
         text: s,
         style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.5),
+          color: palette.text.withValues(alpha: 0.45),
           fontSize: 10,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w700,
+          fontFamily: SideDeckTheme.fontFamily,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -254,14 +294,14 @@ class WaveformPainter extends CustomPainter {
     tp.paint(canvas, o);
   }
 
-  void _drawLoopOverview(Canvas canvas, Size size, double overviewH) {
+  void _drawLoopOverview(Canvas canvas, Size size) {
     if (!loopEnabled || loopEnd <= loopStart || duration <= 0) return;
     final x0 = ((loopStart / duration) * size.width).clamp(0.0, size.width);
     final x1 = ((loopEnd / duration) * size.width).clamp(0.0, size.width);
     if (x1 <= x0) return;
     canvas.drawRect(
-      Rect.fromLTRB(x0, 0, x1, overviewH),
-      Paint()..color = _loopColor.withValues(alpha: 0.45),
+      Rect.fromLTRB(x0, 1, math.max(x1, x0 + 2), overviewH - 1),
+      Paint()..color = palette.lit.withValues(alpha: 0.45),
     );
   }
 
@@ -279,10 +319,10 @@ class WaveformPainter extends CustomPainter {
     final right = x1.clamp(0.0, size.width);
     canvas.drawRect(
       Rect.fromLTRB(left, waveTop, right, size.height),
-      Paint()..color = _loopColor.withValues(alpha: 0.22),
+      Paint()..color = palette.lit.withValues(alpha: 0.12),
     );
     final edge = Paint()
-      ..color = _loopColor
+      ..color = palette.lit
       ..strokeWidth = 2;
     if (x0 >= 0 && x0 <= size.width) {
       canvas.drawLine(Offset(x0, waveTop), Offset(x0, size.height), edge);
@@ -310,18 +350,10 @@ class WaveformPainter extends CustomPainter {
     return math.max(mm.$1.abs(), mm.$2.abs()) / peak;
   }
 
+  /// Deck colour, fainter for quiet passages.
   Color _ampColor(Color base, double amp) {
-    final a = amp.clamp(0.0, 1.0);
-    if (a < 0.25) {
-      return Color.lerp(base.withValues(alpha: 0.35), base, a / 0.25)!;
-    }
-    if (a < 0.6) {
-      return Color.lerp(base, const Color(0xFFE040FB), (a - 0.25) / 0.35)!;
-    }
-    if (a < 0.85) {
-      return Color.lerp(const Color(0xFFE040FB), const Color(0xFFFF6B35), (a - 0.6) / 0.25)!;
-    }
-    return Color.lerp(const Color(0xFFFF6B35), const Color(0xFFFFF3B0), (a - 0.85) / 0.15)!;
+    final a = (amp / 0.75).clamp(0.0, 1.0);
+    return base.withValues(alpha: 0.45 + 0.55 * a);
   }
 
   @override
@@ -335,6 +367,7 @@ class WaveformPainter extends CustomPainter {
         oldDelegate.bpm != bpm ||
         oldDelegate.rate != rate ||
         oldDelegate.color != color ||
+        oldDelegate.palette != palette ||
         oldDelegate.loopEnabled != loopEnabled ||
         oldDelegate.loopStart != loopStart ||
         oldDelegate.loopEnd != loopEnd ||
@@ -480,6 +513,7 @@ class _WaveformViewState extends State<WaveformView>
   Widget build(BuildContext context) {
     final w0 = widget;
     final shown = w0.playing ? _shown : w0.position;
+    final palette = SideDeckColors.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth.isFinite ? constraints.maxWidth : 300.0;
@@ -497,6 +531,7 @@ class _WaveformViewState extends State<WaveformView>
             rate: w0.rate,
             color: w0.color,
             peak: _peak,
+            palette: palette,
             loopEnabled: w0.loopEnabled,
             loopStart: w0.loopStart,
             loopEnd: w0.loopEnd,

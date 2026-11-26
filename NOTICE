@@ -55,6 +55,11 @@ qm-dsp (GNU General Public License 2.0 or later)
   key detection (GetKeyMode, Chromagram, ConstantQ, Decimator).
   Bundled kissfft is BSD-3-Clause (see third_party/qm-dsp/ext/kissfft).
 
+Space Grotesk (SIL Open Font License 1.1)
+  assets/fonts (license: assets/fonts/SpaceGrotesk-OFL.txt)
+  https://github.com/floriankarsten/space-grotesk
+  UI typeface
+
 Mixxx (GNU General Public License 2.0 or later)
   Copyright (C) Mixxx developers
   https://github.com/mixxxdj/mixxx

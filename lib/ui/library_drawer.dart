@@ -473,17 +473,16 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     );
   }
 
+  /// Lit orange when the key mixes with a loaded deck.
   Color? _compatibleKeyColor(int? key) {
     if (key == null || key < 0) return null;
-    Color? color;
     for (var i = 0; i < 2; i++) {
       final d = widget.dj.deck(i);
-      if (!d.loaded || d.key < 0 || !keysCompatible(d.key, key)) continue;
-      final accent = i == 0 ? SideDeckTheme.accentA : SideDeckTheme.accentB;
-      if (color != null && color != accent) return SideDeckTheme.text;
-      color = accent;
+      if (d.loaded && d.key >= 0 && keysCompatible(d.key, key)) {
+        return SideDeckTheme.lit;
+      }
     }
-    return color;
+    return null;
   }
 
   Widget _trackMeta(double? bpm, int? key, double durationSec) {

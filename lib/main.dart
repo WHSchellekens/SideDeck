@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
 import 'package:sidedeck/ui/home_page.dart';
 
@@ -10,6 +11,12 @@ String? bootFatalError;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // The bundled UI font's license, shown under Settings > Open-source licenses.
+  LicenseRegistry.addLicense(() async* {
+    final ofl = await rootBundle.loadString('assets/fonts/SpaceGrotesk-OFL.txt');
+    yield LicenseEntryWithLineBreaks(const ['Space Grotesk'], ofl);
+  });
 
   // Release/TestFlight: surface errors instead of a blank grey screen.
   ErrorWidget.builder = (details) {
