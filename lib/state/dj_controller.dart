@@ -63,13 +63,13 @@ class DjController extends ChangeNotifier {
       engineError = 'Audio engine failed to start.';
     }
     _usbSub = UsbOutput.events().listen(_onUsbEvent);
-    _midiSub = SidekickLink.midi().listen(_onMidi);
     _loadPrefs();
   }
 
   static const _quantizePref = 'quantize';
   static const _usbBufferPref = 'usb_buffer';
   static const _listenPref = 'listen_to_mixer';
+  static const _midiPref = 'read_mixer_midi';
   /// A mixer fader at or below this (of 127) is down.
   static const _faderDown = 3;
 
@@ -114,7 +114,10 @@ class DjController extends ChangeNotifier {
   int listenChannels = 0;
   /// Why listening is off or partial, '' when fine.
   String listenNote = '';
-  /// The mixer's MIDI port, '' when there is none.
+  /// Settings > Read the faders over MIDI: open the mixer's MIDI port. Off
+  /// by default; with it off SideDeck doesn't touch the mixer's MIDI side.
+  bool readMixerMidi = false;
+  /// The mixer's MIDI port, '' when there is none (or reading is off).
   String midiDevice = '';
   /// Last fader position per deck from the mixer's MIDI (0..127); null until
   /// the mixer has sent one.
@@ -179,6 +182,34 @@ class DjController extends ChangeNotifier {
     }
   }
 
+  Future<void> setReadMixerMidi(bool enabled) async {
+    readMixerMidi = enabled;
+    if (enabled) {
+      _openMidi();
+    } else {
+      _closeMidi();
+    }
+    _emit();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_midiPref, enabled);
+    } catch (_) {}
+  }
+
+  // Android opens the mixer's MIDI port while someone listens to the stream
+  // and closes it when the last listener leaves.
+  void _openMidi() {
+    _midiSub ??= SidekickLink.midi().listen(_onMidi);
+  }
+
+  void _closeMidi() {
+    _midiSub?.cancel();
+    _midiSub = null;
+    midiDevice = '';
+    midiFader[0] = null;
+    midiFader[1] = null;
+  }
+
   Future<void> setListenToMixer(bool enabled) async {
     listenToMixer = enabled;
     listenNote = '';
@@ -240,11 +271,13 @@ class DjController extends ChangeNotifier {
       quantize = prefs.getBool(_quantizePref) ?? true;
       usbBuffer = UsbBufferMode.fromKey(prefs.getString(_usbBufferPref));
       listenToMixer = prefs.getBool(_listenPref) ?? false;
+      readMixerMidi = prefs.getBool(_midiPref) ?? false;
     } catch (_) {
       return;
     }
     if (_disposed) return;
     _engine.setQuantize(quantize);
+    if (readMixerMidi) _openMidi();
     _emit();
   }
 

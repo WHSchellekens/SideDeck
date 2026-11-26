@@ -89,11 +89,14 @@ analysis.
    mix, EQ, add effects and cue on the Sidekick.
 4. Set **USB buffer**. Start at Low. Try Ultra if it plays without crackles,
    and go back to Safe if Low crackles.
-5. Optional, for **On air**: SideDeck reads the Sidekick's faders over USB
-   MIDI if it sends them (CC 7 on channels 1–2). Otherwise, turn on **Listen
-   to the mixer** (Android, needs the microphone permission). SideDeck then
-   compares the Sidekick's master on USB inputs 7–8 with what each deck sends,
-   which also measures the phone-to-mixer latency while you play.
+5. Optional, for **On air**: turn on **Read the faders over MIDI** (with MIDI
+   set to ON on the Sidekick) and SideDeck follows its faders (CC 7 on
+   channels 1–2). If the Sidekick's audio stops when you turn it on, turn it
+   off and replug the cable: some phones cut USB audio while the MIDI port is
+   open. The other way is **Listen to the mixer** (Android, needs the
+   microphone permission). SideDeck then compares the Sidekick's master on USB
+   inputs 7–8 with what each deck sends, which also measures the
+   phone-to-mixer latency while you play.
 
 On iPhone, use USB-C or a Lightning camera adapter. The mixer must be a
 class-compliant USB audio device.

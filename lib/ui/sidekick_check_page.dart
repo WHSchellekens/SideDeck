@@ -60,10 +60,17 @@ class _SidekickCheckPageState extends State<SidekickCheckPage> {
           _section('1 · Faders over MIDI'),
           Text(
             'In the Sidekick’s system menu (button under the battery lid) keep USB on '
-            'MULTI and set MIDI to ON. Then move each fader and press each cue button.',
+            'MULTI and set MIDI to ON. Turn on reading below, then move each fader and '
+            'press each cue button. Watch the Sidekick’s meters as you turn it on: if '
+            'the audio stops, this phone cuts USB audio while the MIDI port is open.',
             style: help,
           ),
-          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Read the faders over MIDI'),
+            value: dj.readMixerMidi,
+            onChanged: (v) => dj.setReadMixerMidi(v),
+          ),
           _row('MIDI port', dj.midiDevice.isEmpty ? 'none found' : dj.midiDevice),
           _row('Fader A (CC 7, ch 1)', _fader(dj.midiFader[0])),
           _row('Fader B (CC 7, ch 2)', _fader(dj.midiFader[1])),
@@ -129,6 +136,9 @@ class _SidekickCheckPageState extends State<SidekickCheckPage> {
   String _share(double s) => s < 0 ? '—' : '${(s * 100).round()} %';
 
   String _midiVerdict(DjController dj) {
+    if (!dj.readMixerMidi) {
+      return 'MIDI reading is off. Turn it on above to test.';
+    }
     if (dj.midiFader[0] != null || dj.midiFader[1] != null) {
       return 'Faders arrive while the Sidekick mixes. On air follows them, and the '
           'Sidekick’s controls could drive SideDeck.';

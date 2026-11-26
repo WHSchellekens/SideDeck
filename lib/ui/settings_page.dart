@@ -256,6 +256,20 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              title: const Text('Read the faders over MIDI'),
+              subtitle: const Text(
+                'Opens the Sidekick’s MIDI port (MIDI set to ON on the Sidekick). '
+                'If its audio stops when you turn this on, turn it off and replug '
+                'the cable: some phones cut USB audio while the port is open.',
+              ),
+              value: widget.dj.readMixerMidi,
+              onChanged: (v) async {
+                await widget.dj.setReadMixerMidi(v);
+                if (mounted) setState(() {});
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               title: const Text('Listen to the mixer'),
               subtitle: const Text(
                 'Asks for microphone access. Only the mixer’s USB inputs are read; '
