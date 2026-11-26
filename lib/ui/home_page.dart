@@ -211,16 +211,31 @@ class _HomePageState extends State<HomePage> {
           body: SafeArea(
             child: ColoredBox(
               color: pal.bg,
-              child: Column(
-                children: [
-                  Expanded(flex: 5, child: _waveDeck(0)),
-                  Expanded(flex: 5, child: _waveDeck(1)),
-                  if (dj.externalMixer)
-                    _mixerBar()
-                  else
-                    Expanded(flex: 7, child: _mixerBar(expand: true)),
-                ],
-              ),
+              // External mixer: decks take the full height, Library and
+              // Settings sit on a rail at the right edge. Phone mode keeps
+              // the mixer strip underneath.
+              child: dj.externalMixer
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Expanded(child: _waveDeck(0)),
+                              Expanded(child: _waveDeck(1)),
+                              const SizedBox(height: 2),
+                            ],
+                          ),
+                        ),
+                        _rail(pal),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        Expanded(flex: 5, child: _waveDeck(0)),
+                        Expanded(flex: 5, child: _waveDeck(1)),
+                        Expanded(flex: 7, child: _mixerBar()),
+                      ],
+                    ),
             ),
           ),
         );
@@ -228,9 +243,113 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _mixerBar({bool expand = false}) {
+  static const _railWidth = 52.0;
+
+  Widget _rail(SideDeckColors pal) {
+    final name = UsbOutput.deviceLabel(_djReady.usbDeviceName).toUpperCase();
+    return SizedBox(
+      width: _railWidth,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(
+            color: pal.panel,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+              child: Column(
+                children: [
+                  _railButton(Icons.library_music, 'LIBRARY', _openLibrary, pal),
+                  const SizedBox(height: 6),
+                  _railButton(Icons.settings_outlined, 'SETTINGS', _openSettings, pal),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: RotatedBox(
+                        quarterTurns: 3,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: pal.lit,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'EXT MIXER · $name',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: 1,
+                                  color: pal.muted,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_gridEditDeck != null)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _gridEditDeck = null),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _railButton(IconData icon, String label, VoidCallback onTap, SideDeckColors pal) {
+    return Material(
+      color: pal.unlit,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: pal.pillText),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: pal.pillText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Phone mode only: EQ, filter and crossfader under the decks.
+  Widget _mixerBar() {
     return Stack(
-      fit: expand ? StackFit.expand : StackFit.loose,
+      fit: StackFit.expand,
       children: [
         MixerStrip(
           controller: _djReady,

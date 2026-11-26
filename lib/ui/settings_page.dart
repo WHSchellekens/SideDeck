@@ -165,7 +165,7 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('Use external mixer'),
             subtitle: Text(
               widget.dj.externalMixer
-                  ? 'ON — Deck A → channel 1, Deck B → channel 2 on the '
+                  ? 'ON — Deck A → USB 1–2, Deck B → USB 3–4 on the '
                       '${UsbOutput.deviceLabel(widget.dj.usbDeviceName)}'
                   : 'OFF — audio stays on the phone',
             ),
