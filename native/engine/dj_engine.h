@@ -82,6 +82,9 @@ DJ_FFI_EXPORT void dj_clear_hotcue(DjEngine engine, int deck, int index);
 DJ_FFI_EXPORT void dj_beat_jump(DjEngine engine, int deck, int beats);
 
 DJ_FFI_EXPORT int dj_waveform_bins(void);
+/** Waveform bins of a loaded deck (fixed 2.5 ms each, see dj_waveform_bin_seconds). */
+DJ_FFI_EXPORT int dj_waveform_length(DjEngine engine, int deck);
+DJ_FFI_EXPORT double dj_waveform_bin_seconds(DjEngine engine, int deck);
 DJ_FFI_EXPORT int dj_waveform_copy(DjEngine engine, int deck, float* min_out, float* max_out, int bins);
 /** RMS per waveform bin in the EQ's low (<246 Hz), mid and high (>2484 Hz) bands. */
 DJ_FFI_EXPORT int dj_waveform_bands_copy(DjEngine engine, int deck, float* low_out, float* mid_out,

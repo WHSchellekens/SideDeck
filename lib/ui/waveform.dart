@@ -20,6 +20,7 @@ class WaveformPainter extends CustomPainter {
     required this.peak,
     required this.palette,
     this.style = WaveStyle.solid,
+    this.binSec = 0,
     Float32List? tone,
     Float32List? overviewBands,
     this.rate = 1,
@@ -42,6 +43,8 @@ class WaveformPainter extends CustomPainter {
   final double peak;
   final SideDeckColors palette;
   final WaveStyle style;
+  /// Seconds of audio per bin of [min]/[max]/[tone]; 0: spread over [duration].
+  final double binSec;
   /// Per waveform bin, 0..1: how bass-heavy it is compared with the rest of
   /// the track. Lights the waveform where the kicks are. Empty: by loudness.
   final Float32List tone;
@@ -71,6 +74,7 @@ class WaveformPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.clipRect(Offset.zero & size);
     canvas.drawRect(Offset.zero & size, Paint()..color = palette.screen);
     if (size.width <= 1 || size.height <= 1) {
       return;
@@ -100,13 +104,14 @@ class WaveformPainter extends CustomPainter {
     _drawOverview(canvas, size, n, viewStart, viewEnd);
 
     final half = waveH * waveHeight / 2;
+    final pxPerSec = size.width / viewDur;
     switch (style) {
       case WaveStyle.solid:
-        _drawSolid(canvas, size, n, viewStart, viewDur, mid, half, waveH);
+        _drawSolid(canvas, _slices(n, viewStart, viewEnd, pxPerSec, 1.0), mid, half, waveH);
       case WaveStyle.dots:
-        _drawDots(canvas, size, n, viewStart, viewDur, mid, half);
+        _drawDots(canvas, _slices(n, viewStart, viewEnd, pxPerSec, 4.0), mid, half);
       case WaveStyle.curve:
-        _drawCurve(canvas, size, n, viewStart, viewDur, mid, half);
+        _drawCurve(canvas, _slices(n, viewStart, viewEnd, pxPerSec, 1.5), mid, half);
     }
 
     // Grid on top of the wave so it stays visible.
@@ -127,26 +132,46 @@ class WaveformPainter extends CustomPainter {
     _marker(canvas, size.width / 2, waveTop, 6, 8);
   }
 
-  /// Peak above and below the centre line for one column, as fractions of
-  /// [peak]; null outside the track.
-  (double, double)? _column(int n, double t0, double t1) {
-    if (t1 <= 0 || t0 >= duration) return null;
-    final loHi = _minMaxInRange(t0.clamp(0.0, duration), t1.clamp(0.0, duration), n, duration);
-    return (loHi.$2.abs() / peak, loHi.$1.abs() / peak);
-  }
-
-  /// Bass-heaviness (0..1) of the brightest bin in [t0, t1); -1 without tone data.
-  double _toneIn(double t0, double t1) {
-    final n = tone.length;
-    if (n == 0 || duration <= 0) return -1;
-    final i0 = ((t0.clamp(0.0, duration) / duration) * n).floor().clamp(0, n - 1);
-    var i1 = ((t1.clamp(0.0, duration) / duration) * n).ceil().clamp(0, n - 1);
-    if (i1 < i0) i1 = i0;
-    var best = 0.0;
-    for (var i = i0; i <= i1; i++) {
-      if (tone[i] > best) best = tone[i];
+  /// Cuts the view into equal slices of a beat, about [targetPx] wide, the
+  /// first starting on a grid line. Every beat is then drawn from the same
+  /// stretch of its audio, so a repetitive track looks alike bar after bar
+  /// and a slice keeps its shape while it scrolls. Without a grid: fixed
+  /// slices from the start of the track.
+  _Slices _slices(int n, double viewStart, double viewEnd, double pxPerSec, double targetPx) {
+    final double origin, step;
+    if (bpm > 1) {
+      final beat = 60.0 / bpm;
+      final perBeat = math.max(1, (beat * pxPerSec / targetPx).round());
+      origin = beatOffset;
+      step = beat / perBeat;
+    } else {
+      origin = 0;
+      step = targetPx / pxPerSec;
     }
-    return best;
+    final bin = binSec > 0 ? binSec : duration / n;
+    final k0 = ((viewStart - origin) / step).floor();
+    final k1 = ((viewEnd - origin) / step).ceil();
+    final out = _Slices(k1 - k0 + 1);
+    for (var k = k0; k <= k1; k++) {
+      final t0 = origin + k * step;
+      final t1 = t0 + step;
+      if (t1 <= 0 || t0 >= duration) continue;
+      // The bins whose centres fall in the slice; a slice narrower than a
+      // bin takes the nearest one.
+      var i0 = (t0 / bin - 0.5).ceil();
+      var i1 = (t1 / bin - 0.5).ceil() - 1;
+      if (i1 < i0) i0 = i1 = ((t0 + t1) / 2 / bin).floor();
+      i0 = i0.clamp(0, n - 1);
+      i1 = i1.clamp(0, n - 1);
+      var lo = 0.0, hi = 0.0, lit = -1.0;
+      for (var i = i0; i <= i1; i++) {
+        lo = math.min(lo, min[i]);
+        hi = math.max(hi, max[i]);
+        if (i < tone.length && tone[i] > lit) lit = tone[i];
+      }
+      out.add((t0 - viewStart) * pxPerSec, step * pxPerSec, hi / peak, -lo / peak, lit);
+    }
+    return out;
   }
 
   /// Deck colour lit by the low band: kicks and bass full, the rest dimmed.
@@ -156,39 +181,33 @@ class WaveformPainter extends CustomPainter {
     return base.withValues(alpha: 0.3 + 0.7 * toneValue);
   }
 
-  /// Vertical lines in the deck colour.
-  void _drawSolid(Canvas canvas, Size size, int n, double viewStart, double viewDur,
-      double mid, double half, double waveH) {
+  /// Vertical lines in the deck colour, one per slice.
+  void _drawSolid(Canvas canvas, _Slices s, double mid, double half, double waveH) {
     final paint = Paint();
-    final dt = viewDur / size.width;
-    for (var px = 0.0; px < size.width; px++) {
-      final t0 = viewStart + (px / size.width) * viewDur;
-      final c = _column(n, t0, t0 + dt);
-      if (c == null) continue;
-      final yHi = mid - c.$1 * half;
-      final yLo = mid + c.$2 * half;
-      paint.color = _shade(color, math.max(c.$1, c.$2), _toneIn(t0, t0 + dt));
-      canvas.drawRect(Rect.fromLTWH(px, yHi, 1.05, (yLo - yHi).clamp(1.0, waveH)), paint);
+    for (var i = 0; i < s.length; i++) {
+      final yHi = mid - s.up[i] * half;
+      final yLo = mid + s.down[i] * half;
+      paint.color = _shade(color, math.max(s.up[i], s.down[i]), s.tone[i]);
+      canvas.drawRect(
+        Rect.fromLTWH(s.x[i], yHi, s.w[i] + 0.05, (yLo - yHi).clamp(1.0, waveH)),
+        paint,
+      );
     }
   }
 
   /// Lit cells on a 4 px pitch, like the Sidekick's dot-matrix screen.
-  void _drawDots(Canvas canvas, Size size, int n, double viewStart, double viewDur,
-      double mid, double half) {
+  void _drawDots(Canvas canvas, _Slices s, double mid, double half) {
     const pitch = 4.0;
     const levels = 6;
+    if (s.length == 0) return;
     final rows = (half / pitch).floor();
     final points = List.generate(levels, (_) => <double>[]);
-    final dt = pitch / size.width * viewDur;
-    for (var x = 0.0; x + pitch <= size.width; x += pitch) {
-      final t0 = viewStart + (x / size.width) * viewDur;
-      final c = _column(n, t0, t0 + dt);
-      if (c == null) continue;
-      final t = _toneIn(t0, t0 + dt);
+    for (var i = 0; i < s.length; i++) {
+      final t = s.tone[i];
       final level = t < 0 ? levels - 1 : (t * (levels - 1)).round();
-      final up = math.min(rows, (c.$1 * half / pitch).round());
-      final down = math.min(rows, (c.$2 * half / pitch).round());
-      final cx = x + pitch / 2;
+      final up = math.min(rows, (s.up[i] * half / pitch).round());
+      final down = math.min(rows, (s.down[i] * half / pitch).round());
+      final cx = s.x[i] + s.w[i] / 2;
       final out = points[level];
       for (var r = 0; r < up; r++) {
         out
@@ -201,8 +220,9 @@ class WaveformPainter extends CustomPainter {
           ..add(mid + (r + 0.5) * pitch);
       }
     }
+    // Slices are a whole fraction of a beat, so about (not exactly) 4 px.
     final paint = Paint()
-      ..strokeWidth = pitch - 1
+      ..strokeWidth = (s.w[0] - 1).clamp(1.0, pitch - 1)
       ..strokeCap = StrokeCap.square;
     for (var l = 0; l < levels; l++) {
       if (points[l].isEmpty) continue;
@@ -213,42 +233,37 @@ class WaveformPainter extends CustomPainter {
 
   /// Filled body with a line along the peaks, like the Sidekick's EQ graph.
   /// The body glows where the low band is strong.
-  void _drawCurve(Canvas canvas, Size size, int n, double viewStart, double viewDur,
-      double mid, double half) {
-    const step = 1.5;
-    final cols = (size.width / step).ceil() + 1;
-    final top = Float64List(cols);
-    final bottom = Float64List(cols);
-    final shade = Float64List(cols);
-    final dt = step / size.width * viewDur;
-    for (var i = 0; i < cols; i++) {
-      final t0 = viewStart + (i * step / size.width) * viewDur;
-      final c = _column(n, t0, t0 + dt);
-      if (c == null) continue;
-      top[i] = c.$1 * half;
-      bottom[i] = c.$2 * half;
-      shade[i] = _toneIn(t0, t0 + dt);
-    }
-    final up = _smooth(top);
-    final down = _smooth(bottom);
+  void _drawCurve(Canvas canvas, _Slices s, double mid, double half) {
+    final n = s.length;
+    if (n == 0) return;
+    final up = _smooth(Float64List.sublistView(s.up, 0, n));
+    final down = _smooth(Float64List.sublistView(s.down, 0, n));
     final body = Paint();
-    for (var i = 0; i < cols; i++) {
+    for (var i = 0; i < n; i++) {
       if (up[i] <= 0 && down[i] <= 0) continue;
-      final t = shade[i];
+      final t = s.tone[i];
       body.color = palette.waveBody.withValues(alpha: t < 0 ? 1.0 : 0.35 + 0.65 * t);
-      final x = i * step;
-      canvas.drawRect(Rect.fromLTRB(x, mid - up[i], x + step + 0.05, mid + down[i]), body);
+      canvas.drawRect(
+        Rect.fromLTRB(s.x[i], mid - up[i] * half, s.x[i] + s.w[i] + 0.05, mid + down[i] * half),
+        body,
+      );
     }
     final edge = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6
       ..strokeJoin = StrokeJoin.round;
-    final upper = Path()..moveTo(0, mid - up[0]);
-    final lower = Path()..moveTo(0, mid + down[0]);
-    for (var i = 1; i < cols; i++) {
-      upper.lineTo(i * step, mid - up[i]);
-      lower.lineTo(i * step, mid + down[i]);
+    final upper = Path();
+    final lower = Path();
+    for (var i = 0; i < n; i++) {
+      final cx = s.x[i] + s.w[i] / 2;
+      if (i == 0) {
+        upper.moveTo(cx, mid - up[i] * half);
+        lower.moveTo(cx, mid + down[i] * half);
+      } else {
+        upper.lineTo(cx, mid - up[i] * half);
+        lower.lineTo(cx, mid + down[i] * half);
+      }
     }
     canvas.drawPath(upper, edge);
     canvas.drawPath(lower, edge);
@@ -553,12 +568,37 @@ class WaveformPainter extends CustomPainter {
         oldDelegate.color != color ||
         oldDelegate.palette != palette ||
         oldDelegate.style != style ||
+        oldDelegate.binSec != binSec ||
         oldDelegate.tone != tone ||
         oldDelegate.overviewBands != overviewBands ||
         oldDelegate.loopEnabled != loopEnabled ||
         oldDelegate.loopStart != loopStart ||
         oldDelegate.loopEnd != loopEnd ||
         oldDelegate.showJumpZone != showJumpZone;
+  }
+}
+
+/// The scrolling view cut into slices: left edge and width (px), peaks above
+/// and below the centre line (fractions of the track's peak), and tone
+/// (0..1, or -1 without tone data).
+class _Slices {
+  _Slices(int capacity)
+    : x = Float64List(capacity),
+      w = Float64List(capacity),
+      up = Float64List(capacity),
+      down = Float64List(capacity),
+      tone = Float64List(capacity);
+
+  final Float64List x, w, up, down, tone;
+  int length = 0;
+
+  void add(double left, double width, double above, double below, double lit) {
+    x[length] = left;
+    w[length] = width;
+    up[length] = above;
+    down[length] = below;
+    tone[length] = lit;
+    length++;
   }
 }
 
@@ -570,6 +610,7 @@ class WaveformView extends StatefulWidget {
     required this.position,
     required this.duration,
     required this.color,
+    this.binSec = 0,
     this.playing = false,
     this.beatOffset = 0,
     this.bpm = 0,
@@ -593,6 +634,8 @@ class WaveformView extends StatefulWidget {
   final Float32List? high;
   final Float32List min;
   final Float32List max;
+  /// Seconds of audio per bin of [min]/[max] and the bands (from the engine).
+  final double binSec;
   final double position;
   final double duration;
   final bool playing;
@@ -711,8 +754,10 @@ class _WaveformViewState extends State<WaveformView>
       share[i] = sum > 1e-9 ? lo[i] / sum : 0;
       if (sum > loudest) loudest = sum;
     }
+    // Percentiles from every few bins: a long track has ~150k of them.
+    final stride = math.max(1, n ~/ 30000);
     final sounding = <double>[
-      for (var i = 0; i < n; i++)
+      for (var i = 0; i < n; i += stride)
         if (sums[i] > loudest * 0.05) share[i],
     ]..sort();
     if (sounding.length < 10) {
@@ -731,7 +776,7 @@ class _WaveformViewState extends State<WaveformView>
     // Each band against its own 98th percentile (of the sounding part).
     Float32List normalize(Float32List band) {
       final vals = <double>[
-        for (var i = 0; i < n; i++)
+        for (var i = 0; i < n; i += stride)
           if (sums[i] > loudest * 0.05) band[i],
       ]..sort();
       final top = math.max(1e-9, vals[math.min(vals.length - 1, (vals.length * 0.98).floor())]);
@@ -820,6 +865,7 @@ class _WaveformViewState extends State<WaveformView>
           painter: WaveformPainter(
             min: w0.min,
             max: w0.max,
+            binSec: w0.binSec,
             position: shown,
             duration: w0.duration,
             beatOffset: w0.beatOffset,

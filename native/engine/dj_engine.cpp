@@ -46,7 +46,8 @@
 
 namespace {
 
-// ~10–20 ms per bin on typical tracks so the zoomed view has real transients.
+// Legacy fixed bin count (dj_waveform_bins). Waveforms now use fixed 2.5 ms
+// bins (wave_scan.hpp); ask dj_waveform_length / dj_waveform_bin_seconds.
 constexpr int kWaveformBins = 32768;
 constexpr int kHotCues = 4;
 constexpr int kMaxCallbackFrames = 2048;
@@ -144,6 +145,7 @@ struct Deck {
   std::vector<float> waveMax;
   // RMS per waveform bin in the EQ's low / mid / high bands.
   std::vector<float> waveLow, waveMid, waveHigh;
+  double waveBinSec = 0.0; // seconds of audio per waveform bin
 
   LR4 eqLoL, eqLoR;         // LPF @ 246 Hz
   LR4 eqMidHpL, eqMidHpR;   // HPF @ 246 Hz
@@ -1205,7 +1207,7 @@ int dj_load_with_analysis(DjEngine engine, int deck, const char* path, float bpm
       }
       return 0;
     }
-    scanWave(scan, kWaveformBins, wave);
+    scanWave(scan, wave);
   }
 
   d.cache.waitChunk(0, 2500);
@@ -1227,6 +1229,7 @@ int dj_load_with_analysis(DjEngine engine, int deck, const char* path, float bpm
   d.waveLow = std::move(wave.low);
   d.waveMid = std::move(wave.mid);
   d.waveHigh = std::move(wave.high);
+  d.waveBinSec = wave.binSec;
   d.flushStretcher();
   d.resetFilters();
   d.ensureStretcher();
@@ -1635,6 +1638,24 @@ void dj_beat_jump(DjEngine engine, int deck, int beats) {
 }
 
 int dj_waveform_bins(void) { return kWaveformBins; }
+
+int dj_waveform_length(DjEngine engine, int deck) {
+  if (deck < 0 || deck > 1) {
+    return 0;
+  }
+  Deck& d = asEngine(engine)->decks[deck];
+  std::lock_guard<std::mutex> lock(d.mutex);
+  return (int)d.waveMin.size();
+}
+
+double dj_waveform_bin_seconds(DjEngine engine, int deck) {
+  if (deck < 0 || deck > 1) {
+    return 0.0;
+  }
+  Deck& d = asEngine(engine)->decks[deck];
+  std::lock_guard<std::mutex> lock(d.mutex);
+  return d.waveBinSec;
+}
 
 int dj_waveform_copy(DjEngine engine, int deck, float* min_out, float* max_out, int bins) {
   if (deck < 0 || deck > 1 || !min_out || !max_out || bins <= 0) {

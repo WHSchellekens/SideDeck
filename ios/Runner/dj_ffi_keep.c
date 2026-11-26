@@ -42,6 +42,8 @@ __attribute__((used)) static void* const kDjFfiKeep[] = {
     (void*)&dj_loop_end,
     (void*)&dj_beat_jump,
     (void*)&dj_waveform_bins,
+    (void*)&dj_waveform_length,
+    (void*)&dj_waveform_bin_seconds,
     (void*)&dj_waveform_copy,
     (void*)&dj_waveform_bands_copy,
     (void*)&dj_analyze_file,

@@ -37,7 +37,7 @@ typedef _GetKeyC = Int32 Function(Pointer<Void>, Int32);
 typedef _NudgeC = Void Function(Pointer<Void>, Int32, Float);
 typedef _SetLoopC = Void Function(Pointer<Void>, Int32, Int32, Float);
 typedef _BeatJumpC = Void Function(Pointer<Void>, Int32, Int32);
-typedef _WaveBinsC = Int32 Function();
+typedef _WaveLenC = Int32 Function(Pointer<Void>, Int32);
 typedef _BandsCopyC = Int32 Function(
   Pointer<Void>,
   Int32,
@@ -180,9 +180,10 @@ class NativeEngine {
       .lookupFunction<_BeatJumpC, void Function(Pointer<Void>, int, int)>(
         'dj_beat_jump',
       );
-  late final _waveBins = _lib.lookupFunction<_WaveBinsC, int Function()>(
-    'dj_waveform_bins',
-  );
+  late final _waveLength = _lib
+      .lookupFunction<_WaveLenC, int Function(Pointer<Void>, int)>('dj_waveform_length');
+  late final _waveBinSec = _lib
+      .lookupFunction<_PosC, double Function(Pointer<Void>, int)>('dj_waveform_bin_seconds');
   late final _bandsCopy = _lib
       .lookupFunction<
         _BandsCopyC,
@@ -313,8 +314,9 @@ class NativeEngine {
   double loopEnd(int deck) => _loopEnd(_handle, deck);
   void beatJump(int deck, int beats) => _beatJump(_handle, deck, beats);
 
-  ({Float32List min, Float32List max}) waveform(int deck) {
-    final bins = _waveBins();
+  /// Peaks per waveform bin; each bin is [binSec] of audio (2.5 ms).
+  ({Float32List min, Float32List max, double binSec}) waveform(int deck) {
+    final bins = _bins(deck);
     final minPtr = malloc<Float>(bins);
     final maxPtr = malloc<Float>(bins);
     try {
@@ -322,6 +324,7 @@ class NativeEngine {
       return (
         min: Float32List.fromList(minPtr.asTypedList(n)),
         max: Float32List.fromList(maxPtr.asTypedList(n)),
+        binSec: _waveBinSec(_handle, deck),
       );
     } finally {
       malloc.free(minPtr);
@@ -331,7 +334,7 @@ class NativeEngine {
 
   /// RMS per waveform bin in the EQ's low / mid / high bands.
   ({Float32List low, Float32List mid, Float32List high}) waveformBands(int deck) {
-    final bins = _waveBins();
+    final bins = _bins(deck);
     final lo = malloc<Float>(bins);
     final mi = malloc<Float>(bins);
     final hi = malloc<Float>(bins);
@@ -347,5 +350,11 @@ class NativeEngine {
       malloc.free(mi);
       malloc.free(hi);
     }
+  }
+
+  /// Waveform bins of the loaded track; at least 1 so the buffers allocate.
+  int _bins(int deck) {
+    final n = _waveLength(_handle, deck);
+    return n < 1 ? 1 : n;
   }
 }

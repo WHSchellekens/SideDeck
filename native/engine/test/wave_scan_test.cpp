@@ -30,7 +30,7 @@ void scanTone(double hz, double& low, double& mid, double& high, float& mn, floa
     st[i * 2] = st[i * 2 + 1] = s;
   }
   WaveScan w;
-  w.begin(200, frames, kSr);
+  w.begin(frames, kSr);
   // Feed in uneven blocks, like the decoder does.
   uint64_t pos = 0;
   while (pos < frames) {
@@ -39,7 +39,7 @@ void scanTone(double hz, double& low, double& mid, double& high, float& mn, floa
     pos += n;
   }
   w.finish();
-  const size_t b = 120;
+  const size_t b = w.low.size() / 2;
   const double sum = w.low[b] + w.mid[b] + w.high[b];
   low = w.low[b] / sum;
   mid = w.mid[b] / sum;
@@ -57,21 +57,24 @@ int main() {
   expect("60 Hz kick range is mostly low band", l > 0.8, l);
   scanTone(900.0, l, m, h, mn, mx);
   expect("900 Hz is mostly mid band", m > 0.7, m);
-  // A 10 ms bin holds several 900 Hz cycles, so it reaches both peaks.
+  // A 2.5 ms bin holds two 900 Hz cycles, so it reaches both peaks.
   expect("min/max follow the sine", mn < -0.7f && mx > 0.7f, mx);
   scanTone(7000.0, l, m, h, mn, mx);
   expect("7 kHz is mostly high band", h > 0.8, h);
 
-  // Every bin gets data, including the last one.
+  // Fixed 2.5 ms bins: 10000 frames at 44.1 kHz is 91 bins of 110 frames
+  // (the last one partial), and every bin gets data.
   WaveScan w;
   const uint64_t frames = 10000;
   std::vector<float> st(frames * 2, 0.25f);
-  w.begin(64, frames, kSr);
+  w.begin(frames, kSr);
   w.feed(st.data(), frames, 0);
   w.finish();
+  expect("bin length rounds to whole frames", std::fabs(w.binSec - 110.0 / kSr) < 1e-9, w.binSec);
+  expect("bin count covers the track", w.max.size() == 91, (double)w.max.size());
   bool all = true;
-  for (int b = 0; b < 64; ++b) {
-    all = all && w.max[(size_t)b] > 0.2f;
+  for (size_t b = 0; b < w.max.size(); ++b) {
+    all = all && w.max[b] > 0.2f;
   }
   expect("all bins filled", all, w.max.back());
 

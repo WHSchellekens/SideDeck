@@ -463,10 +463,10 @@ struct StreamingDecoder {
 #endif
 };
 
-// Whole-track overview: shape (min/max) and EQ-band RMS per bin.
-inline void scanWave(StreamingDecoder& dec, int bins, WaveScan& out) {
-  out.begin(bins, dec.totalFrames, (float)dec.sampleRate);
-  if (dec.totalFrames == 0 || bins < 1) {
+// Whole-track waveform: shape (min/max) and EQ-band RMS per 2.5 ms bin.
+inline void scanWave(StreamingDecoder& dec, WaveScan& out) {
+  out.begin(dec.totalFrames, (float)dec.sampleRate);
+  if (dec.totalFrames == 0) {
     return;
   }
   dec.seek(0);

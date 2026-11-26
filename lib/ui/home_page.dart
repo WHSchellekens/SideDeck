@@ -405,6 +405,7 @@ class _HomePageState extends State<HomePage> {
                 WaveformView(
                   min: d.waveMin,
                   max: d.waveMax,
+                  binSec: d.waveBinSec,
                   position: d.position,
                   duration: d.duration,
                   playing: d.playing,

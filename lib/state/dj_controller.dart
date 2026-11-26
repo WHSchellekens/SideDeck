@@ -47,6 +47,8 @@ class DeckState {
   double eqHigh = 0;
   Float32List waveMin = Float32List(0);
   Float32List waveMax = Float32List(0);
+  /// Seconds of audio per waveform bin (fixed 2.5 ms).
+  double waveBinSec = 0;
   /// RMS per waveform bin in the EQ's low / mid / high bands.
   Float32List waveLow = Float32List(0);
   Float32List waveMid = Float32List(0);
@@ -445,6 +447,7 @@ class DjController extends ChangeNotifier {
     final wave = _engine.waveform(deckIndex);
     d.waveMin = wave.min;
     d.waveMax = wave.max;
+    d.waveBinSec = wave.binSec;
     final bands = _engine.waveformBands(deckIndex);
     d.waveLow = bands.low;
     d.waveMid = bands.mid;
