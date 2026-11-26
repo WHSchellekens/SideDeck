@@ -20,13 +20,14 @@ class WaveformPainter extends CustomPainter {
     required this.peak,
     required this.palette,
     this.style = WaveStyle.solid,
+    Float32List? tone,
     this.rate = 1,
     this.loopEnabled = false,
     this.loopStart = 0,
     this.loopEnd = 0,
     this.zoomWindowSec = 8,
     this.showJumpZone = false,
-  });
+  }) : tone = tone ?? Float32List(0);
 
   final Float32List min;
   final Float32List max;
@@ -39,6 +40,9 @@ class WaveformPainter extends CustomPainter {
   final double peak;
   final SideDeckColors palette;
   final WaveStyle style;
+  /// Per waveform bin, 0..1: how bass-heavy it is compared with the rest of
+  /// the track. Lights the waveform where the kicks are. Empty: by loudness.
+  final Float32List tone;
   /// Playback rate (file seconds per heard second). Zooms the scrolling
   /// waveform in heard-time so synced decks share a beat grid.
   final double rate;
@@ -126,17 +130,39 @@ class WaveformPainter extends CustomPainter {
     return (loHi.$2.abs() / peak, loHi.$1.abs() / peak);
   }
 
-  /// Vertical lines in the deck colour, fainter for quiet passages.
+  /// Bass-heaviness (0..1) of the brightest bin in [t0, t1); -1 without tone data.
+  double _toneIn(double t0, double t1) {
+    final n = tone.length;
+    if (n == 0 || duration <= 0) return -1;
+    final i0 = ((t0.clamp(0.0, duration) / duration) * n).floor().clamp(0, n - 1);
+    var i1 = ((t1.clamp(0.0, duration) / duration) * n).ceil().clamp(0, n - 1);
+    if (i1 < i0) i1 = i0;
+    var best = 0.0;
+    for (var i = i0; i <= i1; i++) {
+      if (tone[i] > best) best = tone[i];
+    }
+    return best;
+  }
+
+  /// Deck colour lit by the low band: kicks and bass full, the rest dimmed.
+  /// Falls back to loudness when there is no tone data.
+  Color _shade(Color base, double amp, double toneValue) {
+    if (toneValue < 0) return _ampColor(base, amp);
+    return base.withValues(alpha: 0.3 + 0.7 * toneValue);
+  }
+
+  /// Vertical lines in the deck colour.
   void _drawSolid(Canvas canvas, Size size, int n, double viewStart, double viewDur,
       double mid, double half, double waveH) {
     final paint = Paint();
+    final dt = viewDur / size.width;
     for (var px = 0.0; px < size.width; px++) {
       final t0 = viewStart + (px / size.width) * viewDur;
-      final c = _column(n, t0, t0 + viewDur / size.width);
+      final c = _column(n, t0, t0 + dt);
       if (c == null) continue;
       final yHi = mid - c.$1 * half;
       final yLo = mid + c.$2 * half;
-      paint.color = _ampColor(color, math.max(c.$1, c.$2));
+      paint.color = _shade(color, math.max(c.$1, c.$2), _toneIn(t0, t0 + dt));
       canvas.drawRect(Rect.fromLTWH(px, yHi, 1.05, (yLo - yHi).clamp(1.0, waveH)), paint);
     }
   }
@@ -145,62 +171,69 @@ class WaveformPainter extends CustomPainter {
   void _drawDots(Canvas canvas, Size size, int n, double viewStart, double viewDur,
       double mid, double half) {
     const pitch = 4.0;
+    const levels = 6;
     final rows = (half / pitch).floor();
-    final points = <double>[];
+    final points = List.generate(levels, (_) => <double>[]);
+    final dt = pitch / size.width * viewDur;
     for (var x = 0.0; x + pitch <= size.width; x += pitch) {
       final t0 = viewStart + (x / size.width) * viewDur;
-      final c = _column(n, t0, t0 + pitch / size.width * viewDur);
+      final c = _column(n, t0, t0 + dt);
       if (c == null) continue;
+      final t = _toneIn(t0, t0 + dt);
+      final level = t < 0 ? levels - 1 : (t * (levels - 1)).round();
       final up = math.min(rows, (c.$1 * half / pitch).round());
       final down = math.min(rows, (c.$2 * half / pitch).round());
       final cx = x + pitch / 2;
+      final out = points[level];
       for (var r = 0; r < up; r++) {
-        points
+        out
           ..add(cx)
           ..add(mid - (r + 0.5) * pitch);
       }
       for (var r = 0; r < down; r++) {
-        points
+        out
           ..add(cx)
           ..add(mid + (r + 0.5) * pitch);
       }
     }
-    if (points.isEmpty) return;
-    canvas.drawRawPoints(
-      PointMode.points,
-      Float32List.fromList(points),
-      Paint()
-        ..color = color
-        ..strokeWidth = pitch - 1
-        ..strokeCap = StrokeCap.square,
-    );
+    final paint = Paint()
+      ..strokeWidth = pitch - 1
+      ..strokeCap = StrokeCap.square;
+    for (var l = 0; l < levels; l++) {
+      if (points[l].isEmpty) continue;
+      paint.color = color.withValues(alpha: 0.3 + 0.7 * l / (levels - 1));
+      canvas.drawRawPoints(PointMode.points, Float32List.fromList(points[l]), paint);
+    }
   }
 
   /// Filled body with a line along the peaks, like the Sidekick's EQ graph.
+  /// The body glows where the low band is strong.
   void _drawCurve(Canvas canvas, Size size, int n, double viewStart, double viewDur,
       double mid, double half) {
     const step = 1.5;
     final cols = (size.width / step).ceil() + 1;
     final top = Float64List(cols);
     final bottom = Float64List(cols);
+    final shade = Float64List(cols);
+    final dt = step / size.width * viewDur;
     for (var i = 0; i < cols; i++) {
       final t0 = viewStart + (i * step / size.width) * viewDur;
-      final c = _column(n, t0, t0 + step / size.width * viewDur);
+      final c = _column(n, t0, t0 + dt);
       if (c == null) continue;
       top[i] = c.$1 * half;
       bottom[i] = c.$2 * half;
+      shade[i] = _toneIn(t0, t0 + dt);
     }
     final up = _smooth(top);
     final down = _smooth(bottom);
-    final body = Path()..moveTo(0, mid - up[0]);
-    for (var i = 1; i < cols; i++) {
-      body.lineTo(i * step, mid - up[i]);
+    final body = Paint();
+    for (var i = 0; i < cols; i++) {
+      if (up[i] <= 0 && down[i] <= 0) continue;
+      final t = shade[i];
+      body.color = palette.waveBody.withValues(alpha: t < 0 ? 1.0 : 0.35 + 0.65 * t);
+      final x = i * step;
+      canvas.drawRect(Rect.fromLTRB(x, mid - up[i], x + step + 0.05, mid + down[i]), body);
     }
-    for (var i = cols - 1; i >= 0; i--) {
-      body.lineTo(i * step, mid + down[i]);
-    }
-    body.close();
-    canvas.drawPath(body, Paint()..color = palette.waveBody);
     final edge = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -224,6 +257,17 @@ class WaveformPainter extends CustomPainter {
       out[i] = (prev + 2 * a[i] + next) / 4;
     }
     return out;
+  }
+
+  /// The overview strip of an empty deck: band and rules, no track.
+  void _drawEmptyStrip(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, overviewH),
+      Paint()..color = palette.stripBg,
+    );
+    final rule = Paint()..color = palette.lit.withValues(alpha: 0.5);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, 1), rule);
+    canvas.drawRect(Rect.fromLTWH(0, overviewH - 1, size.width, 1), rule);
   }
 
   /// The still cell grid of the Sidekick screen, behind everything.
@@ -259,17 +303,6 @@ class WaveformPainter extends CustomPainter {
     canvas.drawRect(
       Rect.fromLTRB(winL, 1, winR, overviewH - 1),
       Paint()..color = palette.text.withValues(alpha: 0.13),
-  /// The overview strip of an empty deck: band and rules, no track.
-  void _drawEmptyStrip(Canvas canvas, Size size) {
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, overviewH),
-      Paint()..color = palette.stripBg,
-    );
-    final rule = Paint()..color = palette.lit.withValues(alpha: 0.5);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, 1), rule);
-    canvas.drawRect(Rect.fromLTWH(0, overviewH - 1, size.width, 1), rule);
-  }
-
     );
     _drawLoopOverview(canvas, size);
     final rule = Paint()..color = palette.lit;
@@ -492,6 +525,7 @@ class WaveformPainter extends CustomPainter {
         oldDelegate.color != color ||
         oldDelegate.palette != palette ||
         oldDelegate.style != style ||
+        oldDelegate.tone != tone ||
         oldDelegate.loopEnabled != loopEnabled ||
         oldDelegate.loopStart != loopStart ||
         oldDelegate.loopEnd != loopEnd ||
@@ -513,6 +547,9 @@ class WaveformView extends StatefulWidget {
     this.rate = 1,
     this.scrollRate,
     this.style = WaveStyle.solid,
+    this.low,
+    this.mid,
+    this.high,
     this.loopEnabled = false,
     this.loopStart = 0,
     this.loopEnd = 0,
@@ -521,6 +558,10 @@ class WaveformView extends StatefulWidget {
   });
 
   final WaveStyle style;
+  /// RMS per bin in the EQ's low / mid / high bands (from the engine).
+  final Float32List? low;
+  final Float32List? mid;
+  final Float32List? high;
   final Float32List min;
   final Float32List max;
   final double position;
@@ -560,6 +601,7 @@ class _WaveformViewState extends State<WaveformView>
   double _shown = 0;
   Duration _now = Duration.zero;
   double _peak = 0.001;
+  Float32List _tone = Float32List(0);
 
   static const _snapSec = 0.25;
   static const _easeSec = 0.1;
@@ -569,6 +611,7 @@ class _WaveformViewState extends State<WaveformView>
     super.initState();
     _base = _shown = widget.position;
     _refreshPeak();
+    _refreshTone();
     _syncTicker();
   }
 
@@ -577,6 +620,11 @@ class _WaveformViewState extends State<WaveformView>
     super.didUpdateWidget(old);
     if (!identical(widget.min, old.min) || !identical(widget.max, old.max)) {
       _refreshPeak();
+    }
+    if (!identical(widget.low, old.low) ||
+        !identical(widget.mid, old.mid) ||
+        !identical(widget.high, old.high)) {
+      _refreshTone();
     }
     // Re-base when the engine position jumps, transport starts/stops, or the
     // audible rate changes (BPM nudge / sync / pitch bend) so we don't keep
@@ -602,6 +650,47 @@ class _WaveformViewState extends State<WaveformView>
       peak = math.max(peak, math.max(widget.min[i].abs(), widget.max[i].abs()));
     }
     _peak = peak;
+  }
+
+  /// Low-band share per bin, spread over this track's own range: the least
+  /// bass-heavy fifth of its sound reads dim, the most bass-heavy twentieth
+  /// full. So kicks light up whatever the genre or mastering.
+  void _refreshTone() {
+    final lo = widget.low, mi = widget.mid, hi = widget.high;
+    if (lo == null || mi == null || hi == null) {
+      _tone = Float32List(0);
+      return;
+    }
+    final n = math.min(lo.length, math.min(mi.length, hi.length));
+    if (n == 0) {
+      _tone = Float32List(0);
+      return;
+    }
+    final share = Float32List(n);
+    final sums = Float32List(n);
+    var loudest = 0.0;
+    for (var i = 0; i < n; i++) {
+      final sum = lo[i] + mi[i] + hi[i];
+      sums[i] = sum;
+      share[i] = sum > 1e-9 ? lo[i] / sum : 0;
+      if (sum > loudest) loudest = sum;
+    }
+    final sounding = <double>[
+      for (var i = 0; i < n; i++)
+        if (sums[i] > loudest * 0.05) share[i],
+    ]..sort();
+    if (sounding.length < 10) {
+      _tone = Float32List(0);
+      return;
+    }
+    final from = sounding[(sounding.length * 0.2).floor()];
+    final to = sounding[math.min(sounding.length - 1, (sounding.length * 0.95).floor())];
+    final span = math.max(1e-6, to - from);
+    final tone = Float32List(n);
+    for (var i = 0; i < n; i++) {
+      tone[i] = ((share[i] - from) / span).clamp(0.0, 1.0).toDouble();
+    }
+    _tone = tone;
   }
 
   void _syncTicker() {
@@ -659,6 +748,7 @@ class _WaveformViewState extends State<WaveformView>
             peak: _peak,
             palette: palette,
             style: w0.style,
+            tone: _tone,
             loopEnabled: w0.loopEnabled,
             loopStart: w0.loopStart,
             loopEnd: w0.loopEnd,

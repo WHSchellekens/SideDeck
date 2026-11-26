@@ -47,6 +47,10 @@ class DeckState {
   double eqHigh = 0;
   Float32List waveMin = Float32List(0);
   Float32List waveMax = Float32List(0);
+  /// RMS per waveform bin in the EQ's low / mid / high bands.
+  Float32List waveLow = Float32List(0);
+  Float32List waveMid = Float32List(0);
+  Float32List waveHigh = Float32List(0);
 }
 
 class DjController extends ChangeNotifier {
@@ -441,6 +445,10 @@ class DjController extends ChangeNotifier {
     final wave = _engine.waveform(deckIndex);
     d.waveMin = wave.min;
     d.waveMax = wave.max;
+    final bands = _engine.waveformBands(deckIndex);
+    d.waveLow = bands.low;
+    d.waveMid = bands.mid;
+    d.waveHigh = bands.high;
     _engine.setRate(deckIndex, 1);
     _nudgeBend[deckIndex] = 0;
     _engine.setGain(deckIndex, d.gain);

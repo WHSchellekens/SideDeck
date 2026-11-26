@@ -38,6 +38,14 @@ typedef _NudgeC = Void Function(Pointer<Void>, Int32, Float);
 typedef _SetLoopC = Void Function(Pointer<Void>, Int32, Int32, Float);
 typedef _BeatJumpC = Void Function(Pointer<Void>, Int32, Int32);
 typedef _WaveBinsC = Int32 Function();
+typedef _BandsCopyC = Int32 Function(
+  Pointer<Void>,
+  Int32,
+  Pointer<Float>,
+  Pointer<Float>,
+  Pointer<Float>,
+  Int32,
+);
 typedef _WaveCopyC = Int32 Function(
   Pointer<Void>,
   Int32,
@@ -175,6 +183,18 @@ class NativeEngine {
   late final _waveBins = _lib.lookupFunction<_WaveBinsC, int Function()>(
     'dj_waveform_bins',
   );
+  late final _bandsCopy = _lib
+      .lookupFunction<
+        _BandsCopyC,
+        int Function(
+          Pointer<Void>,
+          int,
+          Pointer<Float>,
+          Pointer<Float>,
+          Pointer<Float>,
+          int,
+        )
+      >('dj_waveform_bands_copy');
   late final _waveCopy = _lib
       .lookupFunction<
         _WaveCopyC,
@@ -306,6 +326,26 @@ class NativeEngine {
     } finally {
       malloc.free(minPtr);
       malloc.free(maxPtr);
+    }
+  }
+
+  /// RMS per waveform bin in the EQ's low / mid / high bands.
+  ({Float32List low, Float32List mid, Float32List high}) waveformBands(int deck) {
+    final bins = _waveBins();
+    final lo = malloc<Float>(bins);
+    final mi = malloc<Float>(bins);
+    final hi = malloc<Float>(bins);
+    try {
+      final n = _bandsCopy(_handle, deck, lo, mi, hi, bins);
+      return (
+        low: Float32List.fromList(lo.asTypedList(n)),
+        mid: Float32List.fromList(mi.asTypedList(n)),
+        high: Float32List.fromList(hi.asTypedList(n)),
+      );
+    } finally {
+      malloc.free(lo);
+      malloc.free(mi);
+      malloc.free(hi);
     }
   }
 }

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "last_error.hpp"
+#include "wave_scan.hpp"
 
 #ifdef __ANDROID__
 #include "mediacodec_aac.hpp"
@@ -462,10 +463,9 @@ struct StreamingDecoder {
 #endif
 };
 
-inline void scanWaveform(StreamingDecoder& dec, int bins, std::vector<float>& waveMin,
-                         std::vector<float>& waveMax) {
-  waveMin.assign((size_t)std::max(1, bins), 0.0f);
-  waveMax.assign((size_t)std::max(1, bins), 0.0f);
+// Whole-track overview: shape (min/max) and EQ-band RMS per bin.
+inline void scanWave(StreamingDecoder& dec, int bins, WaveScan& out) {
+  out.begin(bins, dec.totalFrames, (float)dec.sampleRate);
   if (dec.totalFrames == 0 || bins < 1) {
     return;
   }
@@ -478,13 +478,8 @@ inline void scanWaveform(StreamingDecoder& dec, int bins, std::vector<float>& wa
     if (got == 0) {
       break;
     }
-    for (uint64_t i = 0; i < got; ++i) {
-      const int b = (int)std::min((int64_t)bins - 1,
-                                    (int64_t)((pos + i) * (uint64_t)bins / dec.totalFrames));
-      const float s = 0.5f * (buf[(size_t)i * 2] + buf[(size_t)i * 2 + 1]);
-      waveMin[(size_t)b] = std::min(waveMin[(size_t)b], s);
-      waveMax[(size_t)b] = std::max(waveMax[(size_t)b], s);
-    }
+    out.feed(buf.data(), got, pos);
     pos += got;
   }
+  out.finish();
 }

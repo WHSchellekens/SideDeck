@@ -142,6 +142,8 @@ struct Deck {
 
   std::vector<float> waveMin;
   std::vector<float> waveMax;
+  // RMS per waveform bin in the EQ's low / mid / high bands.
+  std::vector<float> waveLow, waveMid, waveHigh;
 
   LR4 eqLoL, eqLoR;         // LPF @ 246 Hz
   LR4 eqMidHpL, eqMidHpR;   // HPF @ 246 Hz
@@ -1193,7 +1195,7 @@ int dj_load_with_analysis(DjEngine engine, int deck, const char* path, float bpm
   }
   d.cache.hintEngineFrames(0, (int64_t)sr * 2);
 
-  std::vector<float> wmin, wmax;
+  WaveScan wave;
   {
     StreamingDecoder scan;
     if (!scan.open(path)) {
@@ -1203,7 +1205,7 @@ int dj_load_with_analysis(DjEngine engine, int deck, const char* path, float bpm
       }
       return 0;
     }
-    scanWaveform(scan, kWaveformBins, wmin, wmax);
+    scanWave(scan, kWaveformBins, wave);
   }
 
   d.cache.waitChunk(0, 2500);
@@ -1220,8 +1222,11 @@ int dj_load_with_analysis(DjEngine engine, int deck, const char* path, float bpm
   d.bpm = analysis.bpm;
   d.key = analysis.key;
   d.beatOffset = analysis.beatOffsetSec;
-  d.waveMin = std::move(wmin);
-  d.waveMax = std::move(wmax);
+  d.waveMin = std::move(wave.min);
+  d.waveMax = std::move(wave.max);
+  d.waveLow = std::move(wave.low);
+  d.waveMid = std::move(wave.mid);
+  d.waveHigh = std::move(wave.high);
   d.flushStretcher();
   d.resetFilters();
   d.ensureStretcher();
@@ -1288,6 +1293,9 @@ void dj_unload(DjEngine engine, int deck) {
     d.pauseXf = false;
     d.waveMin.clear();
     d.waveMax.clear();
+    d.waveLow.clear();
+    d.waveMid.clear();
+    d.waveHigh.clear();
     d.totalFrames = 0;
     d.path.clear();
   }
@@ -1640,6 +1648,23 @@ int dj_waveform_copy(DjEngine engine, int deck, float* min_out, float* max_out, 
   }
   std::memcpy(min_out, d.waveMin.data(), sizeof(float) * n);
   std::memcpy(max_out, d.waveMax.data(), sizeof(float) * n);
+  return n;
+}
+
+int dj_waveform_bands_copy(DjEngine engine, int deck, float* low_out, float* mid_out,
+                           float* high_out, int bins) {
+  if (deck < 0 || deck > 1 || !low_out || !mid_out || !high_out || bins <= 0) {
+    return 0;
+  }
+  Deck& d = asEngine(engine)->decks[deck];
+  std::lock_guard<std::mutex> lock(d.mutex);
+  const int n = std::min(bins, (int)d.waveLow.size());
+  if (n <= 0) {
+    return 0;
+  }
+  std::memcpy(low_out, d.waveLow.data(), sizeof(float) * n);
+  std::memcpy(mid_out, d.waveMid.data(), sizeof(float) * n);
+  std::memcpy(high_out, d.waveHigh.data(), sizeof(float) * n);
   return n;
 }
 

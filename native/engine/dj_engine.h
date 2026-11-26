@@ -83,6 +83,9 @@ DJ_FFI_EXPORT void dj_beat_jump(DjEngine engine, int deck, int beats);
 
 DJ_FFI_EXPORT int dj_waveform_bins(void);
 DJ_FFI_EXPORT int dj_waveform_copy(DjEngine engine, int deck, float* min_out, float* max_out, int bins);
+/** RMS per waveform bin in the EQ's low (<246 Hz), mid and high (>2484 Hz) bands. */
+DJ_FFI_EXPORT int dj_waveform_bands_copy(DjEngine engine, int deck, float* low_out, float* mid_out,
+                                         float* high_out, int bins);
 
 /** Decode a 60s prefix (22 kHz mono) + BPM/key/grid. Uses ID3 TBPM/TKEY when present. */
 DJ_FFI_EXPORT int dj_analyze_file(const char* path, float* bpm, int* key, float* beat_offset);
