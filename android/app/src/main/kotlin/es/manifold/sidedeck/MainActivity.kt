@@ -64,6 +64,20 @@ class MainActivity : FlutterActivity() {
                     }
                     // Cheap reads (no locks), fine on the main thread.
                     "usbStats" -> result.success(UsbPlayer.stats())
+                    "startSidekickListen" -> {
+                        val handle = (call.argument<Number>("handle") ?: 0).toLong()
+                        val appCtx = applicationContext
+                        usbExecutor.execute {
+                            val map = SidekickLink.startCapture(appCtx, handle)
+                            mainHandler.post { result.success(map) }
+                        }
+                    }
+                    "stopSidekickListen" -> {
+                        usbExecutor.execute {
+                            SidekickLink.stopCapture()
+                            mainHandler.post { result.success(null) }
+                        }
+                    }
                     "stopUsbPlayback" -> {
                         usbExecutor.execute {
                             UsbPlayer.stop()
@@ -86,9 +100,12 @@ class MainActivity : FlutterActivity() {
             )
         }
         EventChannel(messenger, "sidedeck/usb").setStreamHandler(hotplug)
+        SidekickLink.attach(this)
+        EventChannel(messenger, "sidedeck/midi").setStreamHandler(SidekickLink)
     }
 
     override fun onDestroy() {
+        SidekickLink.shutdown()
         UsbPlayer.setUnexpectedStopListener(null)
         usbHotplug?.stop()
         usbHotplug = null

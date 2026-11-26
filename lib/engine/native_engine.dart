@@ -23,6 +23,8 @@ typedef _LoadAnalyzedC = Int32 Function(
 typedef _UnloadC = Void Function(Pointer<Void>, Int32);
 typedef _PlayC = Void Function(Pointer<Void>, Int32, Int32);
 typedef _SetFlagC = Void Function(Pointer<Void>, Int32);
+typedef _GetDeckFloatC = Float Function(Pointer<Void>, Int32);
+typedef _GetFloatC = Float Function(Pointer<Void>);
 typedef _SeekC = Void Function(Pointer<Void>, Int32, Double);
 typedef _PosC = Double Function(Pointer<Void>, Int32);
 typedef _PlayingC = Int32 Function(Pointer<Void>, Int32);
@@ -84,6 +86,30 @@ class NativeEngine {
   late final _setQuantize = _lib
       .lookupFunction<_SetFlagC, void Function(Pointer<Void>, int)>(
         'dj_set_quantize',
+      );
+  late final _onAirEnable = _lib
+      .lookupFunction<_SetFlagC, void Function(Pointer<Void>, int)>(
+        'dj_onair_enable',
+      );
+  late final _onAirShare = _lib
+      .lookupFunction<_GetDeckFloatC, double Function(Pointer<Void>, int)>(
+        'dj_onair_share',
+      );
+  late final _onAirLag = _lib
+      .lookupFunction<_GetFloatC, double Function(Pointer<Void>)>(
+        'dj_onair_lag_ms',
+      );
+  late final _onAirFit = _lib
+      .lookupFunction<_GetFloatC, double Function(Pointer<Void>)>(
+        'dj_onair_fit',
+      );
+  late final _inputChannels = _lib
+      .lookupFunction<_GetIntC, int Function(Pointer<Void>)>(
+        'dj_input_channels',
+      );
+  late final _inputLevel = _lib
+      .lookupFunction<_GetDeckFloatC, double Function(Pointer<Void>, int)>(
+        'dj_input_level',
       );
   late final _seek = _lib
       .lookupFunction<_SeekC, void Function(Pointer<Void>, int, double)>('dj_seek');
@@ -235,6 +261,16 @@ class NativeEngine {
   void unload(int deck) => _unload(_handle, deck);
   void play(int deck, bool playing) => _play(_handle, deck, playing ? 1 : 0);
   void setQuantize(bool enabled) => _setQuantize(_handle, enabled ? 1 : 0);
+
+  /// On-air detection from the external mixer's master return.
+  void setOnAirTracking(bool enabled) => _onAirEnable(_handle, enabled ? 1 : 0);
+  /// Share of the master explained by [deck], 0..1; negative while unknown.
+  double onAirShare(int deck) => _onAirShare(_handle, deck);
+  /// Phone-to-mixer-and-back delay in ms; negative until found.
+  double onAirLagMs() => _onAirLag(_handle);
+  double onAirFit() => _onAirFit(_handle);
+  int inputChannels() => _inputChannels(_handle);
+  double inputLevel(int channel) => _inputLevel(_handle, channel);
   void seek(int deck, double seconds) => _seek(_handle, deck, seconds);
   double position(int deck) => _position(_handle, deck);
   double duration(int deck) => _duration(_handle, deck);
