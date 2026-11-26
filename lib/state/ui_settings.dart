@@ -22,15 +22,29 @@ enum WaveStyle {
 /// Display settings, stored like the other settings.
 class UiSettings extends ChangeNotifier {
   static const _waveStylePref = 'wave_style';
+  static const _outdoorPref = 'outdoor_mode';
 
   WaveStyle waveStyle = WaveStyle.solid;
+  /// Light screen for daylight. Dark is the default.
+  bool outdoor = false;
 
   Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       waveStyle = WaveStyle.fromKey(prefs.getString(_waveStylePref));
+      outdoor = prefs.getBool(_outdoorPref) ?? false;
     } catch (_) {}
     notifyListeners();
+  }
+
+  Future<void> setOutdoor(bool enabled) async {
+    if (outdoor == enabled) return;
+    outdoor = enabled;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_outdoorPref, enabled);
+    } catch (_) {}
   }
 
   Future<void> setWaveStyle(WaveStyle style) async {

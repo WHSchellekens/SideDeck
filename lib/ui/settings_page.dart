@@ -141,6 +141,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pal = SideDeckColors.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
@@ -151,12 +152,12 @@ class _SettingsPageState extends State<SettingsPage> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Turn this on with a USB mixer plugged into the phone. Deck A and Deck B '
             'go out as separate channels so you mix and cue on the hardware — the '
             'on-screen EQ/crossfader hides. Works with devices such as the EP-136 '
             '(set USB mode to Multi). iPhone needs USB-C or a Lightning camera adapter.',
-            style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+            style: TextStyle(color: pal.muted, fontSize: 12, height: 1.4),
           ),
           const SizedBox(height: 8),
           SwitchListTile(
@@ -188,11 +189,11 @@ class _SettingsPageState extends State<SettingsPage> {
               style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Smaller responds faster when you start a track or nudge, but can '
               'crackle. Try Ultra, play for a while and watch the underruns; if '
               'they climb, step back to Low or Safe.',
-              style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+              style: TextStyle(color: pal.muted, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 8),
             SegmentedButton<UsbBufferMode>(
@@ -240,16 +241,29 @@ class _SettingsPageState extends State<SettingsPage> {
             'Display',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Outdoor mode'),
+            subtitle: const Text(
+              'Light screen that stays readable in daylight. Dark is easier '
+              'on the eyes in a club.',
+            ),
+            value: widget.ui.outdoor,
+            onChanged: (v) async {
+              await widget.ui.setOutdoor(v);
+              if (mounted) setState(() {});
+            },
+          ),
           const SizedBox(height: 8),
           const Text(
             'Waveform',
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Solid lines, the Sidekick’s dot matrix, or a filled curve with a '
             'line along the peaks.',
-            style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+            style: TextStyle(color: pal.muted, fontSize: 12, height: 1.4),
           ),
           const SizedBox(height: 8),
           SegmentedButton<WaveStyle>(
@@ -270,11 +284,11 @@ class _SettingsPageState extends State<SettingsPage> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Optional. Tracks download to a local cache, then play like local files. '
             'Use http:// for a server on your LAN. Use https:// if the server is '
             'on the internet — otherwise the login token travels in the clear.',
-            style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+            style: TextStyle(color: pal.muted, fontSize: 12, height: 1.4),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -323,13 +337,13 @@ class _SettingsPageState extends State<SettingsPage> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'SideDeck 1.1.0\n'
             'Copyright © 2026 SideDeck contributors\n\n'
             'This program is free software under the GNU GPL v3 or later. '
             'There is no warranty.\n\n'
             'Support & issues: github.com/manueljpy/SideDeck',
-            style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+            style: TextStyle(color: pal.muted, fontSize: 12, height: 1.4),
           ),
           const SizedBox(height: 12),
           OutlinedButton(

@@ -24,6 +24,9 @@ class SideDeckTheme {
 
   static ThemeData dark() => _build(SideDeckColors.dark);
 
+  /// Light screen for playing outside in daylight (Settings > Outdoor mode).
+  static ThemeData outdoor() => _build(SideDeckColors.outdoor);
+
   static ThemeData _build(SideDeckColors c) {
     final dark = c.brightness == Brightness.dark;
     final scheme = ColorScheme.fromSeed(
@@ -148,6 +151,32 @@ class SideDeckColors extends ThemeExtension<SideDeckColors> {
     halo: Color(0xE6000000),
     stripBg: Color(0xFF000000),
     stripBars: Color(0xFF8E9399),
+  );
+
+  /// Outdoor mode: the same layout on paper. Ink and dark steel replace bone
+  /// and steel, peach replaces ember, and the orange is a touch deeper so it
+  /// holds up on white.
+  static const outdoor = SideDeckColors(
+    brightness: Brightness.light,
+    bg: Color(0xFFD5D6D3),
+    screen: Color(0xFFF4F5F4),
+    panel: Color(0xFFE4E3DF),
+    panelAlt: Color(0xFFFFFFFF),
+    text: Color(0xFF141414),
+    muted: Color(0xFF5F666C),
+    played: Color(0xFFA4A9AE),
+    lit: Color(0xFFE5521A),
+    unlit: Color(0xFFF0C2AC),
+    pillText: Color(0xFF141414),
+    deckA: Color(0xFF141414),
+    deckB: Color(0xFF6B7177),
+    waveBody: Color(0xFFF0C2AC),
+    cellGrid: Color(0xFFE2E3E0),
+    beatLine: Color(0x52141414),
+    playhead: Color(0xFF000000),
+    halo: Color(0xE6FFFFFF),
+    stripBg: Color(0xFFFFFFFF),
+    stripBars: Color(0xFF7C838A),
   );
 
   static SideDeckColors of(BuildContext context) =>

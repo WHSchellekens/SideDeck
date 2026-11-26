@@ -21,12 +21,13 @@ class MixerStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pal = SideDeckColors.of(context);
     if (controller.externalMixer) {
       return ColoredBox(
-        color: SideDeckTheme.panel,
+        color: pal.panel,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
-          child: _externalCenter(),
+          child: _externalCenter(pal),
         ),
       );
     }
@@ -35,21 +36,21 @@ class MixerStrip extends StatelessWidget {
     final b = controller.deckB;
 
     return ColoredBox(
-      color: SideDeckTheme.panel,
+      color: pal.panel,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
         child: Row(
           children: [
-            Expanded(flex: 5, child: _eqBlock(0, a, SideDeckTheme.accentA)),
-            Expanded(flex: 6, child: _center()),
-            Expanded(flex: 5, child: _eqBlock(1, b, SideDeckTheme.accentB)),
+            Expanded(flex: 5, child: _eqBlock(0, a, pal.deckA, pal)),
+            Expanded(flex: 6, child: _center(pal)),
+            Expanded(flex: 5, child: _eqBlock(1, b, pal.deckB, pal)),
           ],
         ),
       ),
     );
   }
 
-  Widget _center() {
+  Widget _center(SideDeckColors pal) {
     return Column(
       children: [
         Row(
@@ -59,12 +60,12 @@ class MixerStrip extends StatelessWidget {
             _iconBtn(Icons.settings_outlined, 'Settings', onSettings),
           ],
         ),
-        const Text(
+        Text(
           'CROSSFADER',
           style: TextStyle(
             fontSize: 9,
             letterSpacing: 1.2,
-            color: SideDeckTheme.muted,
+            color: pal.muted,
           ),
         ),
         Expanded(
@@ -83,7 +84,7 @@ class MixerStrip extends StatelessWidget {
     );
   }
 
-  Widget _externalCenter() {
+  Widget _externalCenter(SideDeckColors pal) {
     final name = UsbOutput.deviceLabel(controller.usbDeviceName);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -97,13 +98,13 @@ class MixerStrip extends StatelessWidget {
               _iconBtn(Icons.settings_outlined, 'Settings', onSettings),
             ],
           ),
-          const Text(
+          Text(
             'EXTERNAL MIXER',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 9,
               letterSpacing: 1.0,
-              color: SideDeckTheme.muted,
+              color: pal.muted,
             ),
           ),
           if (name.isNotEmpty)
@@ -112,7 +113,7 @@ class MixerStrip extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 10, color: SideDeckTheme.text),
+              style: TextStyle(fontSize: 10, color: pal.text),
             ),
         ],
       ),
@@ -130,20 +131,20 @@ class MixerStrip extends StatelessWidget {
     );
   }
 
-  Widget _eqBlock(int deck, DeckState d, Color accent) {
+  Widget _eqBlock(int deck, DeckState d, Color accent, SideDeckColors pal) {
     return Row(
       children: [
         Expanded(
-          child: _vSlider('LOW', d.eqLow, -12, 12, accent, (v) => controller.setEq(deck, low: v)),
+          child: _vSlider('LOW', d.eqLow, -12, 12, accent, pal, (v) => controller.setEq(deck, low: v)),
         ),
         Expanded(
-          child: _vSlider('MID', d.eqMid, -12, 12, accent, (v) => controller.setEq(deck, mid: v)),
+          child: _vSlider('MID', d.eqMid, -12, 12, accent, pal, (v) => controller.setEq(deck, mid: v)),
         ),
         Expanded(
-          child: _vSlider('HIGH', d.eqHigh, -12, 12, accent, (v) => controller.setEq(deck, high: v)),
+          child: _vSlider('HIGH', d.eqHigh, -12, 12, accent, pal, (v) => controller.setEq(deck, high: v)),
         ),
         Expanded(
-          child: _vSlider('FILT', d.filter, -1, 1, accent, (v) => controller.setFilter(deck, v)),
+          child: _vSlider('FILT', d.filter, -1, 1, accent, pal, (v) => controller.setFilter(deck, v)),
         ),
       ],
     );
@@ -155,6 +156,7 @@ class MixerStrip extends StatelessWidget {
     double min,
     double max,
     Color accent,
+    SideDeckColors pal,
     ValueChanged<double> onChanged,
   ) {
     return Column(
@@ -167,7 +169,7 @@ class MixerStrip extends StatelessWidget {
                 trackHeight: 5,
                 thumbColor: accent,
                 activeTrackColor: accent,
-                inactiveTrackColor: SideDeckTheme.panelAlt,
+                inactiveTrackColor: pal.panelAlt,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 9),
                 overlayShape: SliderComponentShape.noOverlay,
               ),
@@ -182,7 +184,7 @@ class MixerStrip extends StatelessWidget {
         ),
         Text(
           label,
-          style: const TextStyle(fontSize: 9, color: SideDeckTheme.muted, letterSpacing: 0.3),
+          style: TextStyle(fontSize: 9, color: pal.muted, letterSpacing: 0.3),
         ),
       ],
     );

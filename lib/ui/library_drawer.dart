@@ -45,6 +45,8 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
   final _search = TextEditingController();
   int _tab = 0;
 
+  SideDeckColors get _pal => SideDeckColors.of(context);
+
   @override
   void initState() {
     super.initState();
@@ -294,7 +296,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     final lib = widget.library;
 
     return Material(
-      color: SideDeckTheme.panel,
+      color: _pal.panel,
       child: SafeArea(
         left: false,
         right: false,
@@ -469,7 +471,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
       line,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+      style: TextStyle(color: _pal.muted, fontSize: 12),
     );
   }
 
@@ -479,7 +481,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     for (var i = 0; i < 2; i++) {
       final d = widget.dj.deck(i);
       if (d.loaded && d.key >= 0 && keysCompatible(d.key, key)) {
-        return SideDeckTheme.lit;
+        return _pal.lit;
       }
     }
     return null;
@@ -500,13 +502,13 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: hasBpm ? SideDeckTheme.text : SideDeckTheme.muted,
+              color: hasBpm ? _pal.text : _pal.muted,
             ),
           ),
           if (durationSec > 0 || hasKey)
             Text.rich(
               TextSpan(
-                style: const TextStyle(color: SideDeckTheme.muted, fontSize: 11),
+                style: TextStyle(color: _pal.muted, fontSize: 11),
                 children: [
                   if (durationSec > 0) TextSpan(text: formatDuration(durationSec)),
                   if (durationSec > 0 && hasKey) const TextSpan(text: '  '),
@@ -534,8 +536,8 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           minimumSize: const Size(0, 32),
           padding: const EdgeInsets.symmetric(horizontal: 10),
           visualDensity: VisualDensity.compact,
-          foregroundColor: on ? Colors.white : SideDeckTheme.muted,
-          backgroundColor: on ? SideDeckTheme.panelAlt : Colors.transparent,
+          foregroundColor: on ? Colors.black : _pal.pillText,
+          backgroundColor: on ? _pal.lit : _pal.unlit,
         ),
         onPressed: () {
           setState(() => _tab = i);
@@ -577,7 +579,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
             '${lib.analyzingPath == null ? '' : ' — ${p.basename(lib.analyzingPath!)}'}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: SideDeckTheme.muted),
+            style: TextStyle(fontSize: 11, color: _pal.muted),
           ),
         ],
       );
@@ -596,7 +598,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
             '${widget.dj.loadingDeck == 0 ? 'A' : 'B'}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: SideDeckTheme.muted),
+            style: TextStyle(fontSize: 11, color: _pal.muted),
           ),
         ),
       ],
@@ -653,9 +655,9 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
                   children: [
                     if (onDeck.isNotEmpty) _deckTag(onDeck),
                     if (playedAt != null)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 4),
-                        child: Icon(Icons.check, size: 14, color: SideDeckTheme.muted),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Icon(Icons.check, size: 14, color: _pal.played),
                       ),
                     Expanded(
                       child: Text(
@@ -664,7 +666,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
                         overflow: TextOverflow.ellipsis,
                         style: playedAt == null
                             ? null
-                            : const TextStyle(color: SideDeckTheme.muted),
+                            : TextStyle(color: _pal.played),
                       ),
                     ),
                   ],
@@ -687,15 +689,15 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
       return const Center(child: CircularProgressIndicator());
     }
     if (tracks.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Text(
             'Tap the folder icon and choose your music folder.\n'
             'Its subfolders show up here as playlists.\n'
             'Then Analyze (waveform icon) for BPM/key, or tap A / B to load.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: SideDeckTheme.muted),
+            style: TextStyle(color: _pal.muted),
           ),
         ),
       );
@@ -751,9 +753,9 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           title: Text(pl.name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             '${pl.trackCount} tracks',
-            style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+            style: TextStyle(color: _pal.muted, fontSize: 12),
           ),
-          trailing: const Icon(Icons.chevron_right, size: 20, color: SideDeckTheme.muted),
+          trailing: Icon(Icons.chevron_right, size: 20, color: _pal.muted),
           onTap: () => lib.openPlaylist(pl.id),
         );
       },
@@ -784,7 +786,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           Text(
             '${lib.tracks.length} tracks'
             '${played > 0 ? ' · $played played' : ''}',
-            style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+            style: TextStyle(color: _pal.muted, fontSize: 12),
           ),
         ],
       ),
@@ -809,12 +811,18 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
       margin: const EdgeInsets.only(right: 6),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        color: label == 'B' ? SideDeckTheme.accentB : SideDeckTheme.accentA,
+        color: label == 'B' ? _pal.deckB : _pal.deckA,
         borderRadius: BorderRadius.circular(3),
       ),
       child: Text(
         label,
-        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.black),
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: (label == 'B' ? _pal.deckB : _pal.deckA).computeLuminance() > 0.2
+              ? Colors.black
+              : Colors.white,
+        ),
       ),
     );
   }
@@ -824,7 +832,6 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: SideDeckTheme.panel,
         title: const Text('Start a new set?'),
         content: Text('Clears the played mark on $count tracks.'),
         actions: [
@@ -845,6 +852,8 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
   Widget _deckBtn(String label, VoidCallback? onPressed, [bool loading = false]) {
     return FilledButton(
       style: FilledButton.styleFrom(
+        backgroundColor: _pal.unlit,
+        foregroundColor: _pal.pillText,
         minimumSize: const Size(36, 32),
         padding: const EdgeInsets.symmetric(horizontal: 10),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -884,7 +893,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           ),
           Text(
             '$count tracks',
-            style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+            style: TextStyle(color: _pal.muted, fontSize: 12),
           ),
         ],
       ),
@@ -893,12 +902,12 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
 
   Widget _playlistList() {
     if (_playlists.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'No playlists on this server yet.\n'
           'Search and press enter to find tracks.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: SideDeckTheme.muted),
+          style: TextStyle(color: _pal.muted),
         ),
       );
     }
@@ -921,9 +930,9 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+                  style: TextStyle(color: _pal.muted, fontSize: 12),
                 ),
-          trailing: const Icon(Icons.chevron_right, size: 20, color: SideDeckTheme.muted),
+          trailing: Icon(Icons.chevron_right, size: 20, color: _pal.muted),
           onTap: () => _openRemotePlaylist(pl),
         );
       },
@@ -936,9 +945,9 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'Set up a Subsonic server in Settings first.',
-              style: TextStyle(color: SideDeckTheme.muted),
+              style: TextStyle(color: _pal.muted),
             ),
             const SizedBox(height: 8),
             FilledButton(
@@ -967,7 +976,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
               ? 'No matching tracks.\nClear the box to go back to playlists.'
               : 'This playlist is empty.',
           textAlign: TextAlign.center,
-          style: const TextStyle(color: SideDeckTheme.muted),
+          style: TextStyle(color: _pal.muted),
         ),
       );
     }

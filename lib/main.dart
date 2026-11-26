@@ -68,6 +68,7 @@ class SideDeckApp extends StatefulWidget {
 class _SideDeckAppState extends State<SideDeckApp> {
   final UiSettings _ui = UiSettings();
   late final ThemeData _dark = SideDeckTheme.dark();
+  late final ThemeData _outdoor = SideDeckTheme.outdoor();
 
   @override
   void initState() {
@@ -83,11 +84,14 @@ class _SideDeckAppState extends State<SideDeckApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SideDeck',
-      debugShowCheckedModeBanner: false,
-      theme: _dark,
-      home: HomePage(ui: _ui),
+    return ListenableBuilder(
+      listenable: _ui,
+      builder: (context, _) => MaterialApp(
+        title: 'SideDeck',
+        debugShowCheckedModeBanner: false,
+        theme: _ui.outdoor ? _outdoor : _dark,
+        home: HomePage(ui: _ui),
+      ),
     );
   }
 }
