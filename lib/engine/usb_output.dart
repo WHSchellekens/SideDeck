@@ -10,6 +10,25 @@ class UsbOutputInfo {
   final String name;
 }
 
+/// Settings > USB buffer. Safe is the original 50 ms path; Low and Ultra ask
+/// Android for a low-latency track and fall back to Safe if it won't start.
+enum UsbBufferMode {
+  safe('safe', 'Safe', 50),
+  low('low', 'Low', 20),
+  ultra('ultra', 'Ultra', 10);
+
+  const UsbBufferMode(this.key, this.label, this.targetMs);
+
+  final String key;
+  final String label;
+  final int targetMs;
+
+  static UsbBufferMode fromKey(String? key) => UsbBufferMode.values.firstWhere(
+        (m) => m.key == key,
+        orElse: () => UsbBufferMode.safe,
+      );
+}
+
 class UsbStartResult {
   const UsbStartResult({
     required this.ok,
@@ -17,6 +36,9 @@ class UsbStartResult {
     required this.routedId,
     required this.routedName,
     required this.error,
+    this.bufferMode = UsbBufferMode.safe,
+    this.bufferFrames = 0,
+    this.fallback = false,
   });
 
   final bool ok;
@@ -24,6 +46,34 @@ class UsbStartResult {
   final int routedId;
   final String routedName;
   final String error;
+  /// Buffer mode the running track actually uses.
+  final UsbBufferMode bufferMode;
+  final int bufferFrames;
+  /// True when a Low/Ultra track failed and Safe was used instead.
+  final bool fallback;
+}
+
+/// Live figures from the running USB track, for Settings.
+class UsbStats {
+  const UsbStats({
+    required this.underruns,
+    required this.latencyMs,
+    required this.bufferFrames,
+    required this.sampleRate,
+    required this.bufferMode,
+    required this.lowLatencyGranted,
+  });
+
+  final int underruns;
+  /// Estimated time from writing a frame to it leaving the phone; negative when
+  /// Android has no timestamp yet.
+  final double latencyMs;
+  final int bufferFrames;
+  final int sampleRate;
+  final UsbBufferMode bufferMode;
+  final bool lowLatencyGranted;
+
+  double get bufferMs => sampleRate > 0 ? bufferFrames * 1000.0 / sampleRate : 0;
 }
 
 class UsbHotplugEvent {
@@ -100,12 +150,14 @@ class UsbOutput {
     required int engineHandle,
     required int deviceId,
     int channels = 4,
+    UsbBufferMode bufferMode = UsbBufferMode.safe,
   }) async {
     try {
       final raw = await _ch.invokeMethod<dynamic>('startUsbPlayback', {
         'handle': engineHandle,
         'deviceId': deviceId,
         'channels': channels,
+        'bufferMode': bufferMode.key,
       });
       if (raw is! Map) {
         return const UsbStartResult(
@@ -122,6 +174,9 @@ class UsbOutput {
         routedId: (raw['routedId'] as num?)?.toInt() ?? 0,
         routedName: '${raw['routedName'] ?? ''}',
         error: '${raw['error'] ?? ''}',
+        bufferMode: UsbBufferMode.fromKey(raw['bufferMode'] as String?),
+        bufferFrames: (raw['bufferFrames'] as num?)?.toInt() ?? 0,
+        fallback: raw['fallback'] == true,
       );
     } catch (e) {
       return UsbStartResult(
@@ -138,5 +193,24 @@ class UsbOutput {
     try {
       await _ch.invokeMethod<void>('stopUsbPlayback');
     } catch (_) {}
+  }
+
+  /// Null when no USB track is running (or not on Android).
+  static Future<UsbStats?> stats() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final raw = await _ch.invokeMethod<dynamic>('usbStats');
+      if (raw is! Map || raw['active'] != true) return null;
+      return UsbStats(
+        underruns: (raw['underruns'] as num?)?.toInt() ?? 0,
+        latencyMs: (raw['latencyMs'] as num?)?.toDouble() ?? -1,
+        bufferFrames: (raw['bufferFrames'] as num?)?.toInt() ?? 0,
+        sampleRate: (raw['sampleRate'] as num?)?.toInt() ?? 0,
+        bufferMode: UsbBufferMode.fromKey(raw['bufferMode'] as String?),
+        lowLatencyGranted: raw['lowLatencyGranted'] == true,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }

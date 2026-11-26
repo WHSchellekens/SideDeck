@@ -6,6 +6,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioMixerAttributes
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.os.Build
 import android.os.Handler
@@ -30,6 +31,10 @@ import kotlin.math.max
  * (google/oboe#2204), and before Android 17 AAudio treats the output reopen caused
  * by preferred mixer attributes as a disconnect, where AudioTrack restores itself
  * (google/oboe#2343).
+ *
+ * Buffer modes (Settings > USB buffer): SAFE is the original path. LOW and ULTRA
+ * ask for PERFORMANCE_MODE_LOW_LATENCY and shrink the buffer after start. A low
+ * mode that does not come up falls back to SAFE.
  */
 object UsbPlayer {
     init {
@@ -39,7 +44,18 @@ object UsbPlayer {
     @JvmStatic
     external fun usbRender(handle: Long, buffer: ByteBuffer, frames: Int, channels: Int)
 
+    enum class BufferMode(val key: String, val targetMs: Int, val lowLatency: Boolean) {
+        SAFE("safe", 50, false),
+        LOW("low", 20, true),
+        ULTRA("ultra", 10, true);
+
+        companion object {
+            fun from(key: String?): BufferMode = values().firstOrNull { it.key == key } ?: SAFE
+        }
+    }
+
     private const val FRAMES = 256
+    private const val LOW_LATENCY_BLOCK = 128
     private const val SAMPLE_RATE = 48000
     private const val VERIFY_TIMEOUT_NS = 500_000_000L
     private const val MAX_STALLS = 200
@@ -48,6 +64,7 @@ object UsbPlayer {
     @Volatile
     private var running = false
     private var thread: Thread? = null
+    @Volatile
     private var track: AudioTrack? = null
     private var audioManager: AudioManager? = null
     private var preferredDevice: AudioDeviceInfo? = null
@@ -58,6 +75,21 @@ object UsbPlayer {
     private var unexpectedStopListener: ((Int, String) -> Unit)? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // What the running track ended up with, for Settings.
+    @Volatile
+    private var activeMode = BufferMode.SAFE
+    @Volatile
+    private var activeBurst = 0
+    @Volatile
+    private var activeBlock = FRAMES
+    @Volatile
+    private var activeChannels = 0
+    @Volatile
+    private var samplesWritten = 0L
+    // Silent frames startAndVerify() wrote into the last track it accepted. They count
+    // in the track's frame position, so the latency estimate has to count them too.
+    private var verifyFrames = 0L
+
     private fun mediaAttributes() = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .build()
@@ -67,9 +99,26 @@ object UsbPlayer {
     }
 
     @Synchronized
-    fun start(context: Context, handle: Long, deviceId: Int, channels: Int): Map<String, Any> {
+    fun start(context: Context, handle: Long, deviceId: Int, channels: Int, bufferMode: String?): Map<String, Any> {
+        val requested = BufferMode.from(bufferMode)
+        if (!requested.lowLatency) return startWith(context, handle, deviceId, channels, BufferMode.SAFE)
+        val low = startWith(context, handle, deviceId, channels, requested)
+        if (low["ok"] == true) return low
+        Log.w("sidedeck", "usb ${requested.key} buffer not accepted; falling back to safe")
+        val safe = startWith(context, handle, deviceId, channels, BufferMode.SAFE)
+        return safe + ("fallback" to (safe["ok"] == true))
+    }
+
+    private fun startWith(
+        context: Context,
+        handle: Long,
+        deviceId: Int,
+        channels: Int,
+        mode: BufferMode,
+    ): Map<String, Any> {
         stop()
         val notes = ArrayList<String>()
+        notes.add("buffer mode: ${mode.key}")
         if (handle == 0L) return failure("Engine not ready", notes)
 
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -79,11 +128,11 @@ object UsbPlayer {
 
         var t: AudioTrack? = null
         if (Build.VERSION.SDK_INT >= 34 && device != null) {
-            t = openViaMixerAttributes(am, device, notes)
+            t = openViaMixerAttributes(am, device, mode, notes)
         } else if (device != null) {
             notes.add("Android ${Build.VERSION.SDK_INT}: preferred mixer attributes need API 34")
         }
-        if (t == null) t = openViaDirectTrack(device, channels, notes)
+        if (t == null) t = openViaDirectTrack(device, channels, mode, notes)
         if (t == null) return failure("Android refused a multi-channel USB track", notes)
 
         // Already playing: candidates are only accepted once startAndVerify() saw them consume audio.
@@ -91,15 +140,30 @@ object UsbPlayer {
         val actual = t.channelCount
         val routed = t.routedDevice
         val encoding = t.audioFormat
+        val burst = if (mode.lowLatency) burstFrames(am) else 0
+        val block = if (!mode.lowLatency) {
+            FRAMES
+        } else if (burst in 64..FRAMES) {
+            burst
+        } else {
+            LOW_LATENCY_BLOCK
+        }
+        if (mode.lowLatency) shrinkBuffer(t, mode, burst, notes)
+        activeMode = mode
+        activeBurst = burst
+        activeBlock = block
+        activeChannels = actual
+        samplesWritten = verifyFrames * actual
         activeDeviceId = routed?.id ?: deviceId
         activeDeviceName = routed?.productName?.toString() ?: ""
         running = true
-        thread = Thread({ loop(handle, actual, encoding) }, "sidedeck-usb").apply {
+        thread = Thread({ loop(handle, actual, encoding, block) }, "sidedeck-usb").apply {
             priority = Thread.MAX_PRIORITY
             start()
         }
         notes.add("track: ${actual}ch ${encodingName(encoding)} @${t.sampleRate}Hz")
         notes.add("routed to: ${routed?.productName ?: "unknown"} (type ${routed?.type ?: -1})")
+        notes.add("buffer ${t.bufferSizeInFrames}/${t.bufferCapacityInFrames} frames, block $block, burst $burst")
         Log.i("sidedeck", "usb start: ${notes.joinToString(" | ")}")
 
         val ok = actual >= 4
@@ -109,6 +173,9 @@ object UsbPlayer {
             "routedId" to activeDeviceId,
             "routedName" to activeDeviceName,
             "error" to if (ok) "" else "Only $actual channels available over USB",
+            "bufferMode" to mode.key,
+            "bufferFrames" to t.bufferSizeInFrames,
+            "fallback" to false,
         )
     }
 
@@ -117,17 +184,55 @@ object UsbPlayer {
         running = false
         thread?.join(500)
         thread = null
+        val t = track
+        track = null
         try {
-            track?.pause()
-            track?.flush()
-            track?.stop()
+            t?.pause()
+            t?.flush()
+            t?.stop()
         } catch (_: Exception) {
         }
-        track?.release()
-        track = null
+        t?.release()
         activeDeviceId = 0
         activeDeviceName = ""
         clearPreferred()
+    }
+
+    /**
+     * Live figures for Settings: underruns since the track started, and an output
+     * latency estimate from AudioTrack.getTimestamp() (when the frame written last
+     * will reach the device, minus now). Safe to call from any thread.
+     */
+    fun stats(): Map<String, Any> {
+        val t = track ?: return mapOf("active" to false)
+        return try {
+            val rate = t.sampleRate
+            val ch = max(1, activeChannels)
+            var latencyMs = -1.0
+            val ts = AudioTimestamp()
+            if (rate > 0 && t.getTimestamp(ts)) {
+                val written = samplesWritten / ch
+                val presentAtNs = ts.nanoTime + (written - ts.framePosition) * 1_000_000_000L / rate
+                latencyMs = (presentAtNs - System.nanoTime()) / 1_000_000.0
+            }
+            val lowLatencyGranted = Build.VERSION.SDK_INT >= 26 &&
+                t.performanceMode == AudioTrack.PERFORMANCE_MODE_LOW_LATENCY
+            mapOf(
+                "active" to true,
+                "underruns" to t.underrunCount,
+                "latencyMs" to latencyMs,
+                "bufferFrames" to t.bufferSizeInFrames,
+                "capacityFrames" to t.bufferCapacityInFrames,
+                "sampleRate" to rate,
+                "bufferMode" to activeMode.key,
+                "burstFrames" to activeBurst,
+                "blockFrames" to activeBlock,
+                "lowLatencyGranted" to lowLatencyGranted,
+            )
+        } catch (e: Exception) {
+            // Released under us by stop() on the control thread.
+            mapOf("active" to false)
+        }
     }
 
     /** Write-loop failure (not an intentional [stop]). Notifies Flutter on the main thread. */
@@ -162,6 +267,9 @@ object UsbPlayer {
             "routedId" to 0,
             "routedName" to "",
             "error" to message,
+            "bufferMode" to "",
+            "bufferFrames" to 0,
+            "fallback" to false,
         )
     }
 
@@ -172,10 +280,36 @@ object UsbPlayer {
                 .maxByOrNull { UsbDevices.maxChannels(am, it) }
     }
 
+    /**
+     * The phone's native output burst. AudioTrack has no per-device burst query, so this
+     * is the primary output's figure; it is still the granularity the mixer works in.
+     * 0 when the device does not report one.
+     */
+    private fun burstFrames(am: AudioManager): Int =
+        am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.takeIf { it > 0 } ?: 0
+
+    /**
+     * Shrink a started low-latency track to its target, rounded up to whole bursts. A burst
+     * larger than the target is ignored rather than rounding Ultra up to a slow device's
+     * 20 ms burst; AudioTrack still clamps to what it can do.
+     */
+    private fun shrinkBuffer(t: AudioTrack, mode: BufferMode, burst: Int, notes: MutableList<String>) {
+        val want = max(64, mode.targetMs * t.sampleRate / 1000)
+        val target = if (burst in 1..want) ((want + burst - 1) / burst) * burst else want
+        val got = try {
+            t.setBufferSizeInFrames(target)
+        } catch (e: Exception) {
+            notes.add("setBufferSizeInFrames threw: $e")
+            return
+        }
+        notes.add("asked $target frames, got $got")
+    }
+
     @RequiresApi(34)
     private fun openViaMixerAttributes(
         am: AudioManager,
         device: AudioDeviceInfo,
+        mode: BufferMode,
         notes: MutableList<String>,
     ): AudioTrack? {
         val supported = try {
@@ -231,7 +365,7 @@ object UsbPlayer {
             pick.format,
         )
         for (format in candidates) {
-            val t = build(attrs, format, device) ?: continue
+            val t = build(attrs, format, device, mode) ?: continue
             if (t.channelCount >= 4 && startAndVerify(t)) {
                 notes.add("mixer track: ${describe(format)}")
                 return t
@@ -251,6 +385,7 @@ object UsbPlayer {
     private fun openViaDirectTrack(
         device: AudioDeviceInfo?,
         channels: Int,
+        mode: BufferMode,
         notes: MutableList<String>,
     ): AudioTrack? {
         val attrs = AudioAttributes.Builder()
@@ -302,7 +437,7 @@ object UsbPlayer {
         }
 
         for (format in candidates) {
-            val t = build(attrs, format, device)
+            val t = build(attrs, format, device, mode)
             if (t != null && t.channelCount >= 4) {
                 if (startAndVerify(t)) {
                     notes.add("direct track: ${describe(format)}")
@@ -320,10 +455,17 @@ object UsbPlayer {
         attrs: AudioAttributes,
         format: AudioFormat,
         device: AudioDeviceInfo?,
+        mode: BufferMode,
     ): AudioTrack? {
         val rate = if (format.sampleRate > 0) format.sampleRate else SAMPLE_RATE
         val bytesPerFrame = format.channelCount * bytesPerSample(format.encoding)
-        val bufBytes = max(bytesPerFrame * (rate / 20), bytesPerFrame * FRAMES * 4)
+        // SAFE keeps the original sizing. Low modes get room to grow (4x the target);
+        // the effective size is set after start with setBufferSizeInFrames.
+        val bufBytes = if (mode.lowLatency) {
+            bytesPerFrame * max(mode.targetMs * rate / 1000 * 4, FRAMES * 4)
+        } else {
+            max(bytesPerFrame * (rate / 20), bytesPerFrame * FRAMES * 4)
+        }
         return try {
             val builder = AudioTrack.Builder()
                 .setAudioAttributes(attrs)
@@ -331,7 +473,9 @@ object UsbPlayer {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setBufferSizeInBytes(bufBytes)
             if (Build.VERSION.SDK_INT >= 26) {
-                builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_NONE)
+                builder.setPerformanceMode(
+                    if (mode.lowLatency) AudioTrack.PERFORMANCE_MODE_LOW_LATENCY else AudioTrack.PERFORMANCE_MODE_NONE,
+                )
             }
             val t = builder.build()
             if (t.state != AudioTrack.STATE_INITIALIZED) {
@@ -341,7 +485,7 @@ object UsbPlayer {
             if (device != null) t.preferredDevice = device
             t
         } catch (e: Exception) {
-            Log.e("sidedeck", "track build ${describe(format)}: $e")
+            Log.e("sidedeck", "track build ${describe(format)} (${mode.key}): $e")
             null
         }
     }
@@ -353,12 +497,15 @@ object UsbPlayer {
     private fun startAndVerify(t: AudioTrack): Boolean {
         val bytesPerFrame = t.channelCount * bytesPerSample(t.audioFormat)
         val silence = ByteBuffer.allocateDirect(bytesPerFrame * FRAMES).order(ByteOrder.nativeOrder())
+        verifyFrames = 0L
         return try {
             t.play()
             val deadline = System.nanoTime() + VERIFY_TIMEOUT_NS
             while (System.nanoTime() < deadline) {
                 silence.position(0)
-                if (t.write(silence, silence.capacity(), AudioTrack.WRITE_NON_BLOCKING) < 0) return false
+                val bytes = t.write(silence, silence.capacity(), AudioTrack.WRITE_NON_BLOCKING)
+                if (bytes < 0) return false
+                verifyFrames += (bytes / bytesPerFrame).toLong()
                 if (t.playbackHeadPosition > 0) return true
                 Thread.sleep(10)
             }
@@ -370,9 +517,9 @@ object UsbPlayer {
         }
     }
 
-    private fun loop(handle: Long, channels: Int, encoding: Int) {
+    private fun loop(handle: Long, channels: Int, encoding: Int, frames: Int) {
         val t = track ?: return
-        val samples = FRAMES * channels
+        val samples = frames * channels
         // The engine always renders float; convert in place where the device wants integers.
         val buffer = ByteBuffer.allocateDirect(samples * 4).order(ByteOrder.nativeOrder())
         val floats = buffer.asFloatBuffer()
@@ -380,7 +527,7 @@ object UsbPlayer {
         val shorts = if (encoding == AudioFormat.ENCODING_PCM_16BIT) ShortArray(samples) else null
         var stalls = 0
         while (running) {
-            usbRender(handle, buffer, FRAMES, channels)
+            usbRender(handle, buffer, frames, channels)
             when (encoding) {
                 AudioFormat.ENCODING_PCM_32BIT -> {
                     for (i in 0 until samples) {
@@ -421,6 +568,7 @@ object UsbPlayer {
                 } else {
                     stalls = 0
                     done += written
+                    samplesWritten += written
                 }
             }
         }

@@ -55,12 +55,15 @@ class MainActivity : FlutterActivity() {
                         val handle = (call.argument<Number>("handle") ?: 0).toLong()
                         val deviceId = call.argument<Int>("deviceId") ?: 0
                         val channels = call.argument<Int>("channels") ?: 4
+                        val bufferMode = call.argument<String>("bufferMode")
                         val appCtx = applicationContext
                         usbExecutor.execute {
-                            val map = UsbPlayer.start(appCtx, handle, deviceId, channels)
+                            val map = UsbPlayer.start(appCtx, handle, deviceId, channels, bufferMode)
                             mainHandler.post { result.success(map) }
                         }
                     }
+                    // Cheap reads (no locks), fine on the main thread.
+                    "usbStats" -> result.success(UsbPlayer.stats())
                     "stopUsbPlayback" -> {
                         usbExecutor.execute {
                             UsbPlayer.stop()

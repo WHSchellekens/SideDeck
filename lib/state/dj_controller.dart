@@ -48,6 +48,7 @@ class DjController extends ChangeNotifier {
   }
 
   static const _quantizePref = 'quantize';
+  static const _usbBufferPref = 'usb_buffer';
 
   late final NativeEngine _engine;
   late final Timer _ticker;
@@ -70,6 +71,10 @@ class DjController extends ChangeNotifier {
   /// Settings > Quantize: a deck that starts while the other plays lands on
   /// its beat phase. The engine does the alignment; this mirrors the toggle.
   bool quantize = true;
+  /// Settings > USB buffer (what you asked for).
+  UsbBufferMode usbBuffer = UsbBufferMode.safe;
+  /// What the running USB track actually uses (Safe after a fallback).
+  UsbBufferMode? usbActiveBuffer;
   bool _disposed = false;
 
   DeckState deck(int i) => i == 0 ? deckA : deckB;
@@ -82,6 +87,7 @@ class DjController extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       quantize = prefs.getBool(_quantizePref) ?? true;
+      usbBuffer = UsbBufferMode.fromKey(prefs.getString(_usbBufferPref));
     } catch (_) {
       return;
     }
@@ -98,6 +104,21 @@ class DjController extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_quantizePref, enabled);
     } catch (_) {}
+  }
+
+  /// Saves the choice and, with the mixer on, restarts USB output with it
+  /// (a short dropout).
+  Future<void> setUsbBuffer(UsbBufferMode mode) async {
+    if (usbBuffer == mode) return;
+    usbBuffer = mode;
+    _emit();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_usbBufferPref, mode.key);
+    } catch (_) {}
+    if (externalMixer && Platform.isAndroid) {
+      await setExternalMixer(true);
+    }
   }
 
   void clearError() {
@@ -585,6 +606,7 @@ class DjController extends ChangeNotifier {
     var usbChannels = 4;
     usbDeviceName = '';
     usbDeviceId = 0;
+    usbActiveBuffer = null;
     await UsbOutput.stopPlayback();
     if (enabled) {
       final usb = await UsbOutput.find();
@@ -600,12 +622,16 @@ class DjController extends ChangeNotifier {
         engineHandle: _engine.nativeHandle,
         deviceId: deviceId,
         channels: usbChannels,
+        bufferMode: usbBuffer,
       );
       externalMixer = res.ok;
       if (res.ok) {
         usbDeviceId = res.routedId != 0 ? res.routedId : deviceId;
         if (res.routedName.isNotEmpty) usbDeviceName = res.routedName;
-        engineError = null;
+        usbActiveBuffer = res.bufferMode;
+        engineError = res.fallback
+            ? 'USB buffer ${usbBuffer.label} did not start on this phone; using Safe.'
+            : null;
       } else {
         await UsbOutput.stopPlayback();
         engineError =

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidedeck/engine/usb_output.dart';
@@ -20,11 +23,76 @@ class _SettingsPageState extends State<SettingsPage> {
   final _pass = TextEditingController();
   String? _status;
   bool _busy = false;
+  Timer? _usbPoll;
+  UsbStats? _usbStats;
+  final List<double> _latency = [];
 
   @override
   void initState() {
     super.initState();
     _load();
+    if (Platform.isAndroid) {
+      _usbPoll = Timer.periodic(
+        const Duration(milliseconds: 500),
+        (_) => _pollUsb(),
+      );
+    }
+  }
+
+  Future<void> _pollUsb() async {
+    if (!widget.dj.externalMixer) {
+      if (_usbStats != null && mounted) {
+        setState(() {
+          _usbStats = null;
+          _latency.clear();
+        });
+      }
+      return;
+    }
+    final s = await UsbOutput.stats();
+    if (!mounted) return;
+    if (s != null && s.bufferMode != _usbStats?.bufferMode) _latency.clear();
+    if (s != null && s.latencyMs >= 0 && s.latencyMs < 1000) {
+      _latency.add(s.latencyMs);
+      if (_latency.length > 8) _latency.removeAt(0);
+    }
+    setState(() => _usbStats = s);
+  }
+
+  /// Median of the last few readings; single timestamps jitter by a block.
+  double? get _latencyMs {
+    if (_latency.isEmpty) return null;
+    final sorted = [..._latency]..sort();
+    return sorted[sorted.length ~/ 2];
+  }
+
+  String _usbStatusLine() {
+    if (!widget.dj.externalMixer) {
+      return 'Applies while the external mixer is on.';
+    }
+    final s = _usbStats;
+    if (s == null) return 'Waiting for USB output…';
+    final lat = _latencyMs;
+    final latency = lat == null ? '—' : '≈ ${lat.round()} ms';
+    final fast = s.lowLatencyGranted ? ', low-latency track' : '';
+    return 'Running ${s.bufferMode.label}: buffer ${s.bufferFrames} frames '
+        '(${s.bufferMs.toStringAsFixed(1)} ms$fast)\n'
+        'Underruns ${s.underruns}   ·   Output latency $latency';
+  }
+
+  Future<void> _setUsbBuffer(UsbBufferMode mode) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await widget.dj.setUsbBuffer(mode);
+    if (!mounted) return;
+    setState(() {
+      _usbStats = null;
+      _latency.clear();
+    });
+    final err = widget.dj.engineError;
+    if (err != null) {
+      messenger.showSnackBar(SnackBar(content: Text(err)));
+      widget.dj.clearError();
+    }
   }
 
   Future<void> _load() async {
@@ -62,6 +130,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    _usbPoll?.cancel();
     _url.dispose();
     _user.dispose();
     _pass.dispose();
@@ -110,6 +179,42 @@ class _SettingsPageState extends State<SettingsPage> {
               }
             },
           ),
+          if (Platform.isAndroid) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'USB buffer',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Smaller responds faster when you start a track or nudge, but can '
+              'crackle. Try Ultra, play for a while and watch the underruns; if '
+              'they climb, step back to Low or Safe.',
+              style: TextStyle(color: SideDeckTheme.muted, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<UsbBufferMode>(
+              showSelectedIcon: false,
+              segments: [
+                for (final m in UsbBufferMode.values)
+                  ButtonSegment(
+                    value: m,
+                    label: Text('${m.label} · ${m.targetMs} ms'),
+                  ),
+              ],
+              selected: {widget.dj.usbBuffer},
+              onSelectionChanged: (s) => _setUsbBuffer(s.first),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _usbStatusLine(),
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
           const Divider(height: 32),
           const Text(
             'Playback',
