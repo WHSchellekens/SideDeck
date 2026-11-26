@@ -63,8 +63,13 @@ class WaveformPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = palette.screen);
-
-    if (min.isEmpty || duration <= 0 || size.width <= 1 || size.height <= 1) {
+    if (size.width <= 1 || size.height <= 1) {
+      return;
+    }
+    // The cell grid is part of the glass: there with or without a track.
+    _drawCells(canvas, Rect.fromLTWH(0, overviewH, size.width, size.height - overviewH));
+    if (min.isEmpty || duration <= 0) {
+      _drawEmptyStrip(canvas, size);
       return;
     }
 
@@ -83,7 +88,6 @@ class WaveformPainter extends CustomPainter {
 
     double xForTime(double t) => ((t - viewStart) / viewDur) * size.width;
 
-    _drawCells(canvas, Rect.fromLTWH(0, waveTop, size.width, waveH));
     _drawOverview(canvas, size, n, viewStart, viewEnd);
 
     final half = waveH * waveHeight / 2;
@@ -255,6 +259,17 @@ class WaveformPainter extends CustomPainter {
     canvas.drawRect(
       Rect.fromLTRB(winL, 1, winR, overviewH - 1),
       Paint()..color = palette.text.withValues(alpha: 0.13),
+  /// The overview strip of an empty deck: band and rules, no track.
+  void _drawEmptyStrip(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, overviewH),
+      Paint()..color = palette.stripBg,
+    );
+    final rule = Paint()..color = palette.lit.withValues(alpha: 0.5);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, 1), rule);
+    canvas.drawRect(Rect.fromLTWH(0, overviewH - 1, size.width, 1), rule);
+  }
+
     );
     _drawLoopOverview(canvas, size);
     final rule = Paint()..color = palette.lit;
@@ -283,8 +298,8 @@ class WaveformPainter extends CustomPainter {
     final beat = Paint()
       ..color = palette.beatLine
       ..strokeWidth = 1.2;
-    final halo = Paint()..color = palette.halo;
-    final bar = Paint()..color = palette.lit;
+    final halo = Paint()..color = palette.halo.withValues(alpha: 0.5);
+    final bar = Paint()..color = palette.lit.withValues(alpha: 0.75);
     var t = beatOffset;
     if (t > viewStart) {
       t -= (((t - viewStart) / beatSec).ceil() * beatSec);
@@ -301,8 +316,8 @@ class WaveformPainter extends CustomPainter {
         continue;
       }
       final phrase = idx % 32 == 0; // 8 bars
-      final w = phrase ? 3.2 : 2.2;
-      halo.strokeWidth = w + 2;
+      final w = phrase ? 2.4 : 1.5;
+      halo.strokeWidth = w + 1.5;
       bar.strokeWidth = w;
       canvas.drawLine(Offset(x, waveTop), Offset(x, size.height), halo);
       canvas.drawLine(Offset(x, waveTop), Offset(x, size.height), bar);
