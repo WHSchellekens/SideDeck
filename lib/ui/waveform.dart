@@ -354,6 +354,7 @@ class WaveformView extends StatefulWidget {
     this.beatOffset = 0,
     this.bpm = 0,
     this.rate = 1,
+    this.scrollRate,
     this.loopEnabled = false,
     this.loopStart = 0,
     this.loopEnd = 0,
@@ -368,7 +369,12 @@ class WaveformView extends StatefulWidget {
   final bool playing;
   final double beatOffset;
   final double bpm;
+  /// Deck tempo rate without the temporary nudge bend. Sets the zoom, so the
+  /// beat grid keeps its size while you hold a nudge button.
   final double rate;
+  /// Rate the playhead actually moves at, nudge included. Only drives the
+  /// scrolling between engine position reports. Defaults to [rate].
+  final double? scrollRate;
   final Color color;
   final bool loopEnabled;
   final double loopStart;
@@ -418,7 +424,7 @@ class _WaveformViewState extends State<WaveformView>
     // integrating an old rate over a long dt.
     if (widget.position != old.position ||
         widget.playing != old.playing ||
-        widget.rate != old.rate) {
+        _scrollRate(widget) != _scrollRate(old)) {
       final err = _shown - widget.position;
       _error = widget.playing && err.abs() < _snapSec ? err : 0;
       _base = widget.position;
@@ -427,6 +433,8 @@ class _WaveformViewState extends State<WaveformView>
     }
     _syncTicker();
   }
+
+  static double _scrollRate(WaveformView w) => w.scrollRate ?? w.rate;
 
   void _refreshPeak() {
     var peak = 0.001;
@@ -451,7 +459,7 @@ class _WaveformViewState extends State<WaveformView>
     _now = elapsed;
     final dt = (elapsed - _baseAt).inMicroseconds / 1e6;
     final ease = math.exp(-dt / _easeSec);
-    var t = _base + dt * widget.rate + _error * ease;
+    var t = _base + dt * _scrollRate(widget) + _error * ease;
     final w = widget;
     final loopLen = w.loopEnd - w.loopStart;
     if (w.loopEnabled && loopLen > 0 && _base <= w.loopEnd && t > w.loopEnd) {
