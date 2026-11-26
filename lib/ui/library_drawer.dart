@@ -7,6 +7,7 @@ import 'package:sidedeck/engine/music_utils.dart';
 import 'package:sidedeck/engine/track_analyzer.dart';
 import 'package:sidedeck/state/dj_controller.dart';
 import 'package:sidedeck/state/library_controller.dart';
+import 'package:sidedeck/state/played_tracks.dart';
 import 'package:sidedeck/subsonic/subsonic_client.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
 
@@ -38,6 +39,8 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
   String? _remoteBusyId;
   String? _remoteBusyLabel;
   final Map<String, TrackAnalysis> _remoteMeta = {};
+  /// Subsonic track id → cached file, so played marks show on remote rows too.
+  final Map<String, String> _remotePaths = {};
   final _cache = AnalysisCache.instance;
   final _search = TextEditingController();
   int _tab = 0;
@@ -73,6 +76,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     for (final t in tracks) {
       final path = await _client?.cachedPathIfPresent(t);
       if (path == null) continue;
+      _remotePaths[t.id] = path;
       try {
         final stat = await File(path).stat();
         final cached = await _cache.get(
@@ -165,6 +169,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     });
     try {
       final path = await _client!.cacheTrack(track);
+      _remotePaths[track.id] = path;
       if (mounted) {
         setState(() => _remoteBusyLabel = 'Loading…');
       }
@@ -378,6 +383,12 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
                           ),
                         ],
                       ),
+                    IconButton(
+                      tooltip: 'New set (clear played marks)',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: widget.dj.played.length == 0 ? null : _confirmNewSet,
+                      icon: const Icon(Icons.restart_alt, size: 22),
+                    ),
                     IconButton(
                       tooltip: 'Pick files',
                       visualDensity: VisualDensity.compact,
@@ -604,7 +615,14 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
     required int? key,
     required double durationSec,
     required List<Widget> actions,
+    String? path,
   }) {
+    final playedAt = path == null ? null : widget.dj.played.at(path);
+    final onDeck = path == null ? '' : _onDeckLabel(path);
+    final statusLine = [
+      if (playedAt != null) 'played ${formatPlayedAt(playedAt)}',
+      if (status != null && status.isNotEmpty) status,
+    ].join(' · ');
     return Padding(
       padding: const EdgeInsets.fromLTRB(2, 4, 8, 4),
       child: Row(
@@ -632,8 +650,27 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ?_trackArtist(artist, status: status),
+                Row(
+                  children: [
+                    if (onDeck.isNotEmpty) _deckTag(onDeck),
+                    if (playedAt != null)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: Icon(Icons.check, size: 14, color: SideDeckTheme.muted),
+                      ),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: playedAt == null
+                            ? null
+                            : const TextStyle(color: SideDeckTheme.muted),
+                      ),
+                    ),
+                  ],
+                ),
+                ?_trackArtist(artist, status: statusLine.isEmpty ? null : statusLine),
               ],
             ),
           ),
@@ -682,6 +719,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           bpm: t.bpm,
           key: t.key,
           durationSec: t.durationMs / 1000.0,
+          path: t.path,
           actions: [
             _deckBtn('A', busy ? null : () => _loadLocal(t, 0), loadingThis && widget.dj.loadingDeck == 0),
             const SizedBox(width: 8),
@@ -725,6 +763,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
 
   Widget _localPlaylistHeader() {
     final lib = widget.library;
+    final played = widget.dj.played.countIn(lib.tracks.map((t) => t.path));
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 0, 12, 4),
       child: Row(
@@ -744,12 +783,64 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
             ),
           ),
           Text(
-            '${lib.tracks.length} tracks',
+            '${lib.tracks.length} tracks'
+            '${played > 0 ? ' · $played played' : ''}',
             style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
           ),
         ],
       ),
     );
+  }
+
+  /// 'A', 'B' or 'AB' when the track is loaded on a deck.
+  String _onDeckLabel(String path) {
+    final a = widget.dj.deck(0).loaded && widget.dj.deck(0).path == path;
+    final b = widget.dj.deck(1).loaded && widget.dj.deck(1).path == path;
+    return a && b
+        ? 'AB'
+        : a
+            ? 'A'
+            : b
+                ? 'B'
+                : '';
+  }
+
+  Widget _deckTag(String label) {
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: label == 'B' ? SideDeckTheme.accentB : SideDeckTheme.accentA,
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.black),
+      ),
+    );
+  }
+
+  Future<void> _confirmNewSet() async {
+    final count = widget.dj.played.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: SideDeckTheme.panel,
+        title: const Text('Start a new set?'),
+        content: Text('Clears the played mark on $count tracks.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('New set'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await widget.dj.newSet();
   }
 
   Widget _deckBtn(String label, VoidCallback? onPressed, [bool loading = false]) {
@@ -907,6 +998,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           bpm: meta?.bpm,
           key: meta?.key,
           durationSec: t.duration.toDouble(),
+          path: _remotePaths[t.id],
           actions: [
             _deckBtn('A', busy ? null : () => _loadRemote(t, 0)),
             const SizedBox(width: 8),

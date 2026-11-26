@@ -8,6 +8,7 @@ import 'package:sidedeck/engine/analysis_cache.dart';
 import 'package:sidedeck/engine/native_engine.dart';
 import 'package:sidedeck/engine/track_analyzer.dart';
 import 'package:sidedeck/engine/usb_output.dart';
+import 'package:sidedeck/state/played_tracks.dart';
 
 class DeckState {
   String? path;
@@ -75,6 +76,10 @@ class DjController extends ChangeNotifier {
   UsbBufferMode usbBuffer = UsbBufferMode.safe;
   /// What the running USB track actually uses (Safe after a fallback).
   UsbBufferMode? usbActiveBuffer;
+  /// Tracks played in this set (30 s on a deck), for the library.
+  final PlayedTracks played = PlayedTracks();
+  final List<PlayClock> _playClocks = [PlayClock(), PlayClock()];
+  DateTime? _lastTick;
   bool _disposed = false;
 
   DeckState deck(int i) => i == 0 ? deckA : deckB;
@@ -84,6 +89,7 @@ class DjController extends ChangeNotifier {
   }
 
   Future<void> _loadPrefs() async {
+    await played.load();
     try {
       final prefs = await SharedPreferences.getInstance();
       quantize = prefs.getBool(_quantizePref) ?? true;
@@ -104,6 +110,12 @@ class DjController extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_quantizePref, enabled);
     } catch (_) {}
+  }
+
+  /// Library > New set: forget which tracks were played.
+  Future<void> newSet() async {
+    await played.clear();
+    _emit();
   }
 
   /// Saves the choice and, with the mixer on, restarts USB output with it
@@ -190,6 +202,13 @@ class DjController extends ChangeNotifier {
   }
 
   void _tick() {
+    final now = DateTime.now();
+    final last = _lastTick;
+    _lastTick = now;
+    // Clamped so a stall (app in background) can't count as minutes of play.
+    final dt = last == null
+        ? 0.0
+        : (now.difference(last).inMicroseconds / 1e6).clamp(0.0, 0.5).toDouble();
     var dirty = false;
     for (var i = 0; i < 2; i++) {
       final d = deck(i);
@@ -198,6 +217,10 @@ class DjController extends ChangeNotifier {
       d.playing = _engine.isPlaying(i);
       if (d.loopEnabled) {
         _readLoop(i);
+      }
+      final path = d.path;
+      if (d.playing && path != null && _playClocks[i].add(dt)) {
+        played.mark(path, now);
       }
       dirty = true;
     }
@@ -247,6 +270,7 @@ class DjController extends ChangeNotifier {
       return false;
     }
     d.path = path;
+    _playClocks[deckIndex].reset();
     d.title = title ?? path.split(RegExp(r'[\\/]')).last;
     d.artist = artist ?? '';
     d.loaded = true;
