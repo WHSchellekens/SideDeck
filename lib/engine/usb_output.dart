@@ -39,6 +39,7 @@ class UsbStartResult {
     this.bufferMode = UsbBufferMode.safe,
     this.bufferFrames = 0,
     this.fallback = false,
+    this.details = '',
   });
 
   final bool ok;
@@ -51,6 +52,8 @@ class UsbStartResult {
   final int bufferFrames;
   /// True when a Low/Ultra track failed and Safe was used instead.
   final bool fallback;
+  /// What Android offered and did, one step per line, for Settings.
+  final String details;
 }
 
 /// Live figures from the running USB track, for Settings.
@@ -177,6 +180,7 @@ class UsbOutput {
         bufferMode: UsbBufferMode.fromKey(raw['bufferMode'] as String?),
         bufferFrames: (raw['bufferFrames'] as num?)?.toInt() ?? 0,
         fallback: raw['fallback'] == true,
+        details: '${raw['details'] ?? ''}',
       );
     } catch (e) {
       return UsbStartResult(

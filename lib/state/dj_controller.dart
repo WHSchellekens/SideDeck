@@ -99,6 +99,8 @@ class DjController extends ChangeNotifier {
   UsbBufferMode usbBuffer = UsbBufferMode.safe;
   /// What the running USB track actually uses (Safe after a fallback).
   UsbBufferMode? usbActiveBuffer;
+  /// How the last USB start went, step by step (Settings > USB details).
+  String usbDetails = '';
   /// Tracks played in this set (30 s on a deck), for the library.
   final PlayedTracks played = PlayedTracks();
   final List<PlayClock> _playClocks = [PlayClock(), PlayClock()];
@@ -846,6 +848,7 @@ class DjController extends ChangeNotifier {
         channels: usbChannels,
         bufferMode: usbBuffer,
       );
+      usbDetails = res.details;
       externalMixer = res.ok;
       if (res.ok) {
         usbDeviceId = res.routedId != 0 ? res.routedId : deviceId;

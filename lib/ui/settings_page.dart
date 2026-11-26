@@ -241,6 +241,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
+            if (widget.dj.usbDetails.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'USB details',
+                style: TextStyle(fontSize: 12, color: pal.muted),
+              ),
+              SelectableText(
+                widget.dj.usbDetails,
+                style: TextStyle(fontSize: 11, height: 1.4, color: pal.muted),
+              ),
+            ],
             const SizedBox(height: 16),
             const Text(
               'On air',

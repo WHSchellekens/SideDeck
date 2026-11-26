@@ -106,7 +106,8 @@ object UsbPlayer {
         if (low["ok"] == true) return low
         Log.w("sidedeck", "usb ${requested.key} buffer not accepted; falling back to safe")
         val safe = startWith(context, handle, deviceId, channels, BufferMode.SAFE)
-        return safe + ("fallback" to (safe["ok"] == true))
+        val details = "${low["details"] ?: ""}\n(fell back to safe)\n${safe["details"] ?: ""}"
+        return safe + mapOf<String, Any>("fallback" to (safe["ok"] == true), "details" to details)
     }
 
     private fun startWith(
@@ -124,6 +125,12 @@ object UsbPlayer {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager = am
         val device = findDevice(am, deviceId)
+        notes.add(
+            "outputs: " + am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).joinToString(", ") {
+                "${it.productName} (type ${it.type}, ${it.channelCounts.maxOrNull() ?: 0} ch)"
+            },
+        )
+        notes.add("asked for: ${device?.productName ?: "none"} (id $deviceId, $channels ch)")
         if (device == null) notes.add("no USB output device in AudioManager")
 
         var t: AudioTrack? = null
@@ -176,6 +183,7 @@ object UsbPlayer {
             "bufferMode" to mode.key,
             "bufferFrames" to t.bufferSizeInFrames,
             "fallback" to false,
+            "details" to notes.joinToString("\n"),
         )
     }
 
@@ -270,6 +278,7 @@ object UsbPlayer {
             "bufferMode" to "",
             "bufferFrames" to 0,
             "fallback" to false,
+            "details" to notes.joinToString("\n"),
         )
     }
 
