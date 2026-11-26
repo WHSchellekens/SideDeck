@@ -372,6 +372,9 @@ class _HomePageState extends State<HomePage> {
     final deckColor = pal.deck(i);
     final d = _djReady.deck(i);
     final remaining = (d.duration - d.position).clamp(0.0, 99999.0);
+    // Only when the mixer tells us (fader over MIDI, or heard in its master).
+    final onAirKnown = _djReady.onAirSource(i) != OnAirSource.none;
+    final showOnAir = onAirKnown && _djReady.onAir(i);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
@@ -426,7 +429,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 Positioned(
                   left: play + 12,
-                  right: d.loaded ? 104 : 8,
+                  right: d.loaded ? (showOnAir ? 176 : 104) : 8,
                   top: overview + 5,
                   child: IgnorePointer(child: _info(i, d, remaining, pal)),
                 ),
@@ -464,6 +467,10 @@ class _HomePageState extends State<HomePage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (showOnAir) ...[
+                          _onAirTag(pal),
+                          const SizedBox(width: 6),
+                        ],
                         _deckTag(i, deckColor),
                         const SizedBox(width: 6),
                         _gridButton(i, pal),
@@ -589,6 +596,28 @@ class _HomePageState extends State<HomePage> {
             color: pal.text,
             size: size * 0.5,
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Lit like a Sidekick pill: this deck is in the main mix.
+  Widget _onAirTag(SideDeckColors pal) {
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: pal.lit,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: const Text(
+        'ON AIR',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.8,
+          color: Colors.black,
         ),
       ),
     );

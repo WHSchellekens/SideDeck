@@ -8,6 +8,7 @@ import 'package:sidedeck/state/dj_controller.dart';
 import 'package:sidedeck/state/ui_settings.dart';
 import 'package:sidedeck/subsonic/subsonic_client.dart';
 import 'package:sidedeck/theme/sidedeck_theme.dart';
+import 'package:sidedeck/ui/sidekick_check_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.dj, required this.ui});
@@ -80,6 +81,29 @@ class _SettingsPageState extends State<SettingsPage> {
     return 'Running ${s.bufferMode.label}: buffer ${s.bufferFrames} frames '
         '(${s.bufferMs.toStringAsFixed(1)} ms$fast)\n'
         'Underruns ${s.underruns}   ·   Output latency $latency';
+  }
+
+  String _onAirStatus() {
+    final dj = widget.dj;
+    final lines = <String>[
+      dj.midiDevice.isEmpty ? 'MIDI: no port from the mixer' : 'MIDI: ${dj.midiDevice}',
+    ];
+    if (!dj.externalMixer) {
+      lines.add('Applies while the external mixer is on.');
+    } else {
+      for (var i = 0; i < 2; i++) {
+        final how = switch (dj.onAirSource(i)) {
+          OnAirSource.midi => 'mixer fader (MIDI)',
+          OnAirSource.listening => 'heard in the master',
+          OnAirSource.none => 'no signal yet; counts while playing',
+        };
+        lines.add('Deck ${i == 0 ? 'A' : 'B'}: $how');
+      }
+      final lat = dj.mixerLatencyMs;
+      if (lat != null) lines.add('Phone → mixer → phone: ≈ ${lat.round()} ms');
+    }
+    if (dj.listenNote.isNotEmpty) lines.add(dj.listenNote);
+    return lines.join('\n');
   }
 
   Future<void> _setUsbBuffer(UsbBufferMode mode) async {
@@ -215,6 +239,50 @@ class _SettingsPageState extends State<SettingsPage> {
                 fontSize: 12,
                 height: 1.5,
                 fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'On air',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Played marks and the ON AIR tag follow the Sidekick’s faders when it '
+              'sends them over MIDI. Otherwise SideDeck can listen to its master '
+              'output (USB inputs 7–8) to tell which deck you hear. Without either, '
+              'a playing deck counts as on air.',
+              style: TextStyle(color: pal.muted, fontSize: 12, height: 1.4),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Listen to the mixer'),
+              subtitle: const Text(
+                'Asks for microphone access. Only the mixer’s USB inputs are read; '
+                'nothing is recorded or stored.',
+              ),
+              value: widget.dj.listenToMixer,
+              onChanged: (v) async {
+                await widget.dj.setListenToMixer(v);
+                if (mounted) setState(() {});
+              },
+            ),
+            Text(
+              _onAirStatus(),
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => SidekickCheckPage(dj: widget.dj)),
+                ),
+                child: const Text('Sidekick check'),
               ),
             ),
           ],

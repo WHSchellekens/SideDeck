@@ -3,12 +3,24 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidedeck/engine/analysis_cache.dart';
 import 'package:sidedeck/engine/native_engine.dart';
+import 'package:sidedeck/engine/sidekick_link.dart';
 import 'package:sidedeck/engine/track_analyzer.dart';
 import 'package:sidedeck/engine/usb_output.dart';
 import 'package:sidedeck/state/played_tracks.dart';
+
+/// What tells SideDeck that a deck is in the external mixer's main mix.
+enum OnAirSource {
+  /// Nothing: a playing deck counts as on air.
+  none,
+  /// The mixer's fader, sent over USB MIDI (CC 7 on channel 1 or 2).
+  midi,
+  /// Listening to the mixer's master return (USB inputs 7-8).
+  listening,
+}
 
 class DeckState {
   String? path;
@@ -45,15 +57,20 @@ class DjController extends ChangeNotifier {
       engineError = 'Audio engine failed to start.';
     }
     _usbSub = UsbOutput.events().listen(_onUsbEvent);
+    _midiSub = SidekickLink.midi().listen(_onMidi);
     _loadPrefs();
   }
 
   static const _quantizePref = 'quantize';
   static const _usbBufferPref = 'usb_buffer';
+  static const _listenPref = 'listen_to_mixer';
+  /// A mixer fader at or below this (of 127) is down.
+  static const _faderDown = 3;
 
   late final NativeEngine _engine;
   late final Timer _ticker;
   StreamSubscription<UsbHotplugEvent>? _usbSub;
+  StreamSubscription<SidekickMidiEvent>? _midiSub;
   final AnalysisCache _analysisCache = AnalysisCache.instance;
   final Set<int> _declinedMixerIds = {};
 
@@ -82,7 +99,129 @@ class DjController extends ChangeNotifier {
   DateTime? _lastTick;
   bool _disposed = false;
 
+  /// Settings > Listen to the mixer: capture its USB inputs (master on 7-8)
+  /// for on-air detection and latency. Android, external mixer only.
+  bool listenToMixer = false;
+  /// Capture is running.
+  bool listening = false;
+  /// USB inputs Android opened (8 includes the master return).
+  int listenChannels = 0;
+  /// Why listening is off or partial, '' when fine.
+  String listenNote = '';
+  /// The mixer's MIDI port, '' when there is none.
+  String midiDevice = '';
+  /// Last fader position per deck from the mixer's MIDI (0..127); null until
+  /// the mixer has sent one.
+  final List<int?> midiFader = [null, null];
+  /// Newest MIDI messages from the mixer, for the check screen.
+  final List<String> midiLog = [];
+  final List<bool> _heardOnAir = [true, true];
+
   DeckState deck(int i) => i == 0 ? deckA : deckB;
+
+  /// What decides whether deck [i] is on air right now.
+  OnAirSource onAirSource(int i) {
+    if (!externalMixer) return OnAirSource.none;
+    if (midiFader[i] != null) return OnAirSource.midi;
+    if (listening && listenChannels >= 8 && _engine.onAirShare(i) >= 0) {
+      return OnAirSource.listening;
+    }
+    return OnAirSource.none;
+  }
+
+  /// Deck [i] is audible in the main mix: playing, and its fader up when the
+  /// mixer tells us. With nothing to go on, playing counts.
+  bool onAir(int i) {
+    final d = deck(i);
+    if (!d.loaded || !d.playing) return false;
+    return switch (onAirSource(i)) {
+      OnAirSource.midi => (midiFader[i] ?? 0) > _faderDown,
+      OnAirSource.listening => _heardOnAir[i],
+      OnAirSource.none => true,
+    };
+  }
+
+  /// Phone-to-mixer-and-back delay measured while listening, in ms; null
+  /// until there is music to measure it on.
+  double? get mixerLatencyMs {
+    if (!listening) return null;
+    final lag = _engine.onAirLagMs();
+    return lag >= 0 ? lag : null;
+  }
+
+  /// For the check screen.
+  double onAirShare(int i) => listening ? _engine.onAirShare(i) : -1;
+  double get onAirFit => listening ? _engine.onAirFit() : 0;
+  int get inputChannels => listening ? _engine.inputChannels() : 0;
+  double inputLevel(int channel) => listening ? _engine.inputLevel(channel) : 0;
+
+  void _onMidi(SidekickMidiEvent e) {
+    midiLog.add(e.describe());
+    if (midiLog.length > 40) midiLog.removeAt(0);
+    if (e.isDevice) {
+      midiDevice = e.name;
+      if (e.name.isEmpty) {
+        midiFader[0] = null;
+        midiFader[1] = null;
+      }
+      _emit();
+      return;
+    }
+    // Fader: CC 7, or CC 9 while Select is held (guide, 8.1).
+    if (e.kind == 'cc' && (e.number == 7 || e.number == 9) && e.channel <= 1) {
+      midiFader[e.channel] = e.value;
+    }
+  }
+
+  Future<void> setListenToMixer(bool enabled) async {
+    listenToMixer = enabled;
+    listenNote = '';
+    _emit();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_listenPref, enabled);
+    } catch (_) {}
+    if (enabled && externalMixer) {
+      await _startListening();
+    } else if (!enabled) {
+      await _stopListening();
+    }
+    _emit();
+  }
+
+  Future<void> _startListening() async {
+    if (!Platform.isAndroid || listening) return;
+    final mic = await Permission.microphone.request();
+    if (!mic.isGranted) {
+      listenNote = 'Listening needs microphone access. SideDeck only reads '
+          'the mixer over USB and stores nothing.';
+      return;
+    }
+    _engine.setOnAirTracking(true);
+    final res = await SidekickLink.startListening(_engine.nativeHandle);
+    if (_disposed) return;
+    if (!res.ok) {
+      _engine.setOnAirTracking(false);
+      listenNote = res.error.isEmpty ? 'Could not listen to the mixer.' : res.error;
+      return;
+    }
+    listening = true;
+    listenChannels = res.channels;
+    _heardOnAir[0] = true;
+    _heardOnAir[1] = true;
+    listenNote = res.channels >= 8
+        ? ''
+        : 'Android opened ${res.channels} of the mixer’s inputs, so its master '
+            '(inputs 7–8) can’t be heard.';
+  }
+
+  Future<void> _stopListening() async {
+    final was = listening;
+    listening = false;
+    listenChannels = 0;
+    if (was) await SidekickLink.stopListening();
+    _engine.setOnAirTracking(false);
+  }
 
   void _emit() {
     if (!_disposed) notifyListeners();
@@ -94,6 +233,7 @@ class DjController extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       quantize = prefs.getBool(_quantizePref) ?? true;
       usbBuffer = UsbBufferMode.fromKey(prefs.getString(_usbBufferPref));
+      listenToMixer = prefs.getBool(_listenPref) ?? false;
     } catch (_) {
       return;
     }
@@ -209,6 +349,18 @@ class DjController extends ChangeNotifier {
     final dt = last == null
         ? 0.0
         : (now.difference(last).inMicroseconds / 1e6).clamp(0.0, 0.5).toDouble();
+    if (listening) {
+      // Hysteresis on the heard share: on above 20 %, off below 10 %.
+      for (var i = 0; i < 2; i++) {
+        final s = _engine.onAirShare(i);
+        if (s < 0) continue;
+        if (s >= 0.2) {
+          _heardOnAir[i] = true;
+        } else if (s < 0.1) {
+          _heardOnAir[i] = false;
+        }
+      }
+    }
     var dirty = false;
     for (var i = 0; i < 2; i++) {
       final d = deck(i);
@@ -218,8 +370,9 @@ class DjController extends ChangeNotifier {
       if (d.loopEnabled) {
         _readLoop(i);
       }
+      // Played = 30 s on air (fader up, when the mixer tells us).
       final path = d.path;
-      if (d.playing && path != null && _playClocks[i].add(dt)) {
+      if (path != null && onAir(i) && _playClocks[i].add(dt)) {
         played.mark(path, now);
       }
       dirty = true;
@@ -631,6 +784,7 @@ class DjController extends ChangeNotifier {
     usbDeviceName = '';
     usbDeviceId = 0;
     usbActiveBuffer = null;
+    await _stopListening();
     await UsbOutput.stopPlayback();
     if (enabled) {
       final usb = await UsbOutput.find();
@@ -683,6 +837,9 @@ class DjController extends ChangeNotifier {
       externalMixer = false;
       if (!enabled) engineError = null;
     }
+    if (externalMixer && listenToMixer && Platform.isAndroid) {
+      await _startListening();
+    }
     notifyListeners();
   }
 
@@ -690,6 +847,9 @@ class DjController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _usbSub?.cancel();
+    _midiSub?.cancel();
+    if (listening) SidekickLink.stopListening();
+    _engine.setOnAirTracking(false);
     _ticker.cancel();
     _nudgeHold[0]?.cancel();
     _nudgeHold[1]?.cancel();

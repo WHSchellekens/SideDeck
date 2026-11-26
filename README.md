@@ -71,7 +71,7 @@ engine is compiled by CMake during the Xcode build.
 - Local music folder whose subfolders show as playlists; file picker; sort; analyze missing
   or all (iPhone: Files app / Finder sharing)
 - Library highlights keys compatible with a loaded deck and marks tracks you already played
-  (30 s on a deck; "New set" clears them)
+  (30 s on air; "New set" clears them)
 - Subsonic browse and cache-to-file
 - External USB mixer: Deck A → channels 1–2, Deck B → channels 3–4
 
@@ -94,6 +94,15 @@ Safe (~50 ms), Low (~20 ms) or Ultra (~10 ms). Settings shows the underrun
 count and an output latency estimate while the mixer is on, so you can find
 the smallest setting your phone plays without crackles. If Low or Ultra
 does not start, SideDeck falls back to Safe and says so.
+
+**On air**: with the mixer's faders known, a deck shows ON AIR and only
+on-air time counts towards a played mark. SideDeck reads the EP-136's
+faders over USB MIDI when it sends them (CC 7 on channels 1–2), or, with
+**Listen to the mixer** on (Android, microphone permission), compares the
+mixer's master return on USB inputs 7–8 with what each deck sends. The
+second also measures the phone-to-mixer latency while you play. Settings ›
+**Sidekick check** shows the MIDI messages, the levels of all 8 USB inputs,
+the measured latency and each deck's share of the master.
 
 ## Subsonic
 
