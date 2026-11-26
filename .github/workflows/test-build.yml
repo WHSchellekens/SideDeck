@@ -1,0 +1,117 @@
+name: Test build (debug APK)
+
+# Builds the sidekick-tuning branch on every push and publishes the APK as the
+# "sidekick-test" pre-release, so it can be downloaded straight onto a phone.
+# Analyze and the tests run first; they don't block the APK, but a failure in
+# any of them marks the run as failed.
+
+on:
+  push:
+    branches: [sidekick-tuning]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PUB_CACHE: ${{ github.workspace }}/.pub-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Same Flutter pin as the release workflow: the .metadata revision.
+      - name: Install Flutter
+        run: |
+          set -euo pipefail
+          rev=$(sed -n -E 's/.*revision: "(.*)"/\1/p' .metadata | head -n1)
+          test -n "$rev"
+          git clone --filter=blob:none https://github.com/flutter/flutter.git "$HOME/flutter"
+          git -C "$HOME/flutter" fetch --depth 1 origin "$rev"
+          git -C "$HOME/flutter" checkout --force FETCH_HEAD
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+          echo "FLUTTER_ROOT=$HOME/flutter" >> "$GITHUB_ENV"
+
+      - name: Flutter config
+        run: |
+          flutter config --no-analytics
+          flutter --version
+
+      # The same debug key every run, so each test build installs over the last.
+      - name: Restore debug signing key
+        id: keystore
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: sidedeck-debug-keystore-v1
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze
+        id: analyze
+        continue-on-error: true
+        run: flutter analyze
+
+      - name: Dart tests
+        id: dart_tests
+        continue-on-error: true
+        run: flutter test
+
+      - name: Engine tests (C++)
+        id: engine_tests
+        continue-on-error: true
+        run: |
+          cmake -S native/engine -B build/native-tests
+          cmake --build build/native-tests
+          ctest --test-dir build/native-tests --output-on-failure
+
+      - name: Build debug APK (arm64)
+        run: flutter build apk --debug --target-platform android-arm64
+
+      - name: Save debug signing key
+        if: steps.keystore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: sidedeck-debug-keystore-v1
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidedeck-test-arm64
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+      - name: Publish the sidekick-test pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp build/app/outputs/flutter-apk/app-debug.apk sidedeck-test.apk
+          gh release delete sidekick-test --cleanup-tag --yes || true
+          gh release create sidekick-test sidedeck-test.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "SideDeck test build" \
+            --notes "Debug build of ${GITHUB_SHA::7} from the sidekick-tuning branch, for testing. Not a release."
+
+      - name: Report checks
+        if: steps.analyze.outcome == 'failure' || steps.dart_tests.outcome == 'failure' || steps.engine_tests.outcome == 'failure'
+        run: |
+          echo "analyze: ${{ steps.analyze.outcome }}"
+          echo "dart tests: ${{ steps.dart_tests.outcome }}"
+          echo "engine tests: ${{ steps.engine_tests.outcome }}"
+          exit 1
