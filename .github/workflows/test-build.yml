@@ -1,4 +1,4 @@
-name: Test build (debug APK)
+name: Test build (APK)
 
 # Builds the sidekick-tuning branch on every push and publishes the APK as the
 # "sidekick-test" pre-release, so it can be downloaded straight onto a phone.
