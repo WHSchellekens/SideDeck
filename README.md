@@ -33,6 +33,9 @@ with any USB mixer that takes two stereo decks.
   master.
 - **Library and Settings on a rail** at the right edge in external mixer mode,
   out of the way of the decks.
+- **Phone volume check**: Android keeps a separate volume for the USB mixer,
+  and at 0 the Sidekick gets silence. The rail shows it, lit orange below max
+  (tap for max), and a banner warns when it's at 0.
 
 **Beatmatching**
 
@@ -87,9 +90,12 @@ analysis.
 3. In Settings, turn on **Use external mixer**. Deck A plays on USB channels
    1–2 and Deck B on USB channels 3–4. The on-screen EQ and crossfader hide;
    mix, EQ, add effects and cue on the Sidekick.
-4. Set **USB buffer**. Start at Low. Try Ultra if it plays without crackles,
+4. Turn the phone's volume for the Sidekick all the way up: press volume up
+   while it's connected, or tap **VOL** on the rail. Android keeps a separate
+   volume per output, and below max the Sidekick gets less than full level.
+5. Set **USB buffer**. Start at Low. Try Ultra if it plays without crackles,
    and go back to Safe if Low crackles.
-5. Optional, for **On air**: turn on **Read the faders over MIDI** (with MIDI
+6. Optional, for **On air**: turn on **Read the faders over MIDI** (with MIDI
    set to ON on the Sidekick) and SideDeck follows its faders (CC 7 on
    channels 1–2). If the Sidekick's audio stops when you turn it on, turn it
    off and replug the cable: some phones cut USB audio while the MIDI port is

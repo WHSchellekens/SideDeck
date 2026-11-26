@@ -78,9 +78,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final lat = _latencyMs;
     final latency = lat == null ? '—' : '≈ ${lat.round()} ms';
     final fast = s.lowLatencyGranted ? ', low-latency track' : '';
+    final vol = widget.dj.mixerVolume;
+    final volume = vol == null || !vol.usb
+        ? ''
+        : '\nPhone volume for the mixer ${vol.percent} %'
+            '${widget.dj.mixerVolumeLow ? ' (below max: the mixer gets less)' : ''}';
     return 'Running ${s.bufferMode.label}: buffer ${s.bufferFrames} frames '
         '(${s.bufferMs.toStringAsFixed(1)} ms$fast)\n'
-        'Underruns ${s.underruns}   ·   Output latency $latency';
+        'Underruns ${s.underruns}   ·   Output latency $latency$volume';
   }
 
   String _onAirStatus() {

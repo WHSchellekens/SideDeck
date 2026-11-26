@@ -101,6 +101,11 @@ class DjController extends ChangeNotifier {
   UsbBufferMode? usbActiveBuffer;
   /// How the last USB start went, step by step (Settings > USB details).
   String usbDetails = '';
+  /// The phone's media volume for the mixer, read each second in external
+  /// mixer mode (Android); null otherwise.
+  MixerVolume? mixerVolume;
+  bool _volumeBusy = false;
+  int _ticksSinceVolume = 0;
   /// Tracks played in this set (30 s on a deck), for the library.
   final PlayedTracks played = PlayedTracks();
   final List<PlayClock> _playClocks = [PlayClock(), PlayClock()];
@@ -314,6 +319,31 @@ class DjController extends ChangeNotifier {
     }
   }
 
+  /// The phone sends the mixer less than full level (nothing at 0): its
+  /// media volume for the mixer is below max.
+  bool get mixerVolumeLow {
+    final v = mixerVolume;
+    return externalMixer && v != null && v.usb && !v.full;
+  }
+
+  Future<void> raiseMixerVolume() async {
+    await UsbOutput.raiseMediaVolume();
+    await _readMixerVolume();
+  }
+
+  Future<void> _readMixerVolume() async {
+    if (_volumeBusy) return;
+    _volumeBusy = true;
+    final v = externalMixer ? await UsbOutput.mediaVolume() : null;
+    _volumeBusy = false;
+    if (_disposed) return;
+    final next = externalMixer ? v : null;
+    if (next != mixerVolume) {
+      mixerVolume = next;
+      _emit();
+    }
+  }
+
   void clearError() {
     engineError = null;
     notifyListeners();
@@ -386,6 +416,10 @@ class DjController extends ChangeNotifier {
     final now = DateTime.now();
     final last = _lastTick;
     _lastTick = now;
+    if (externalMixer && Platform.isAndroid && ++_ticksSinceVolume >= 20) {
+      _ticksSinceVolume = 0;
+      _readMixerVolume();
+    }
     // Clamped so a stall (app in background) can't count as minutes of play.
     final dt = last == null
         ? 0.0
@@ -887,6 +921,7 @@ class DjController extends ChangeNotifier {
     if (externalMixer && listenToMixer && Platform.isAndroid) {
       await _startListening();
     }
+    await _readMixerVolume();
     notifyListeners();
   }
 

@@ -64,6 +64,13 @@ class MainActivity : FlutterActivity() {
                     }
                     // Cheap reads (no locks), fine on the main thread.
                     "usbStats" -> result.success(UsbPlayer.stats())
+                    "mediaVolume" -> result.success(
+                        UsbDevices.mediaVolume(getSystemService(Context.AUDIO_SERVICE) as AudioManager),
+                    )
+                    "raiseMediaVolume" -> {
+                        UsbDevices.raiseMediaVolume(getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                        result.success(null)
+                    }
                     "startSidekickListen" -> {
                         val handle = (call.argument<Number>("handle") ?: 0).toLong()
                         val appCtx = applicationContext

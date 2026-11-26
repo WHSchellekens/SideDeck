@@ -1,5 +1,6 @@
 package es.manifold.sidedeck
 
+import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
@@ -8,12 +9,47 @@ import kotlin.math.max
 object UsbDevices {
     const val MIN_MIXER_CHANNELS = 4
 
-    fun isUsbOutput(d: AudioDeviceInfo) =
-        d.isSink && (
-            d.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-                d.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-                d.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+    private fun isUsbType(type: Int) =
+        type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+            type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+            type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+
+    fun isUsbOutput(d: AudioDeviceInfo) = d.isSink && isUsbType(d.type)
+
+    /**
+     * Android keeps a media volume per output device. In external mixer mode media
+     * goes to the USB mixer, and at 0 the mixer gets silence from every app (SideDeck
+     * included) while the phone's own volume looks fine. "usb" is false when Android
+     * says media goes elsewhere (API 33+; older phones assume the USB mixer).
+     */
+    fun mediaVolume(am: AudioManager): Map<String, Any> {
+        var usb = true
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()
+                usb = am.getAudioDevicesForAttributes(attrs).any { isUsbType(it.type) }
+            } catch (_: Exception) {
+            }
+        }
+        return mapOf(
+            "volume" to am.getStreamVolume(AudioManager.STREAM_MUSIC),
+            "max" to am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+            "fixed" to am.isVolumeFixed,
+            "usb" to usb,
+        )
+    }
+
+    /** Media volume to max, with Android's volume slider shown so the change is visible. */
+    fun raiseMediaVolume(am: AudioManager) {
+        try {
+            am.setStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+                AudioManager.FLAG_SHOW_UI,
             )
+        } catch (_: Exception) {
+        }
+    }
 
     /**
      * [AudioDeviceInfo.getChannelCounts] already includes position and index

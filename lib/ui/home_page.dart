@@ -220,11 +220,18 @@ class _HomePageState extends State<HomePage> {
                   ? Row(
                       children: [
                         Expanded(
-                          child: Column(
+                          child: Stack(
+                            fit: StackFit.expand,
                             children: [
-                              Expanded(child: _waveDeck(0)),
-                              Expanded(child: _waveDeck(1)),
-                              const SizedBox(height: 2),
+                              Column(
+                                children: [
+                                  Expanded(child: _waveDeck(0)),
+                                  Expanded(child: _waveDeck(1)),
+                                  const SizedBox(height: 2),
+                                ],
+                              ),
+                              if (dj.mixerVolumeLow && dj.mixerVolume!.silent)
+                                Center(child: _silentMixerBanner(pal)),
                             ],
                           ),
                         ),
@@ -263,6 +270,10 @@ class _HomePageState extends State<HomePage> {
                   _railButton(Icons.library_music, 'LIBRARY', _openLibrary, pal),
                   const SizedBox(height: 6),
                   _railButton(Icons.settings_outlined, 'SETTINGS', _openSettings, pal),
+                  if (_djReady.mixerVolume?.usb ?? false) ...[
+                    const SizedBox(height: 6),
+                    _railVolume(pal),
+                  ],
                   Expanded(
                     child: Align(
                       alignment: Alignment.bottomCenter,
@@ -314,9 +325,73 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _railButton(IconData icon, String label, VoidCallback onTap, SideDeckColors pal) {
+  /// The phone's volume for the mixer. Lit while it's below max (the mixer
+  /// gets less than full level, nothing at 0); a tap sets it to max.
+  Widget _railVolume(SideDeckColors pal) {
+    final dj = _djReady;
+    final v = dj.mixerVolume!;
+    final low = dj.mixerVolumeLow;
+    final icon = v.silent
+        ? Icons.volume_off
+        : low
+            ? Icons.volume_down
+            : Icons.volume_up;
+    return _railButton(icon, 'VOL ${v.percent}%', () => dj.raiseMixerVolume(), pal, lit: low);
+  }
+
+  /// Over the decks while the phone's volume for the mixer is 0: everything
+  /// plays, the mixer hears nothing.
+  Widget _silentMixerBanner(SideDeckColors pal) {
+    final name = UsbOutput.deviceLabel(_djReady.usbDeviceName);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Material(
+        color: pal.lit,
+        borderRadius: BorderRadius.circular(8),
+        elevation: 6,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.volume_off, color: Colors.black, size: 20),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  'The phone’s volume for the $name is at 0, so it gets silence.',
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => _djReady.raiseMixerVolume(),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.black,
+                  backgroundColor: Colors.black12,
+                ),
+                child: const Text('SET TO MAX'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _railButton(
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+    SideDeckColors pal, {
+    bool lit = false,
+  }) {
+    final ink = lit ? Colors.black : pal.pillText;
     return Material(
-      color: pal.unlit,
+      color: lit ? pal.lit : pal.unlit,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: onTap,
@@ -327,7 +402,7 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 22, color: pal.pillText),
+              Icon(icon, size: 22, color: ink),
               const SizedBox(height: 4),
               FittedBox(
                 fit: BoxFit.scaleDown,
@@ -337,7 +412,7 @@ class _HomePageState extends State<HomePage> {
                     fontSize: 8,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.6,
-                    color: pal.pillText,
+                    color: ink,
                   ),
                 ),
               ),

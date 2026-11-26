@@ -56,6 +56,40 @@ class UsbStartResult {
   final String details;
 }
 
+/// Android's media volume for the output media plays on: the USB mixer in
+/// external mixer mode. Android keeps one per device; at 0 the mixer gets
+/// silence from every app while the phone's own volume looks fine.
+class MixerVolume {
+  const MixerVolume({
+    required this.volume,
+    required this.max,
+    required this.fixed,
+    required this.usb,
+  });
+
+  final int volume;
+  final int max;
+  /// The output has no adjustable volume (always full).
+  final bool fixed;
+  /// Media goes to a USB device (Android 13+ can tell; older phones: assumed).
+  final bool usb;
+
+  int get percent => max > 0 ? (volume * 100 / max).round() : 100;
+  bool get full => fixed || volume >= max;
+  bool get silent => !fixed && volume <= 0;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MixerVolume &&
+      other.volume == volume &&
+      other.max == max &&
+      other.fixed == fixed &&
+      other.usb == usb;
+
+  @override
+  int get hashCode => Object.hash(volume, max, fixed, usb);
+}
+
 /// Live figures from the running USB track, for Settings.
 class UsbStats {
   const UsbStats({
@@ -196,6 +230,31 @@ class UsbOutput {
   static Future<void> stopPlayback() async {
     try {
       await _ch.invokeMethod<void>('stopUsbPlayback');
+    } catch (_) {}
+  }
+
+  /// The phone's media volume for where media plays now (Android only).
+  static Future<MixerVolume?> mediaVolume() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final raw = await _ch.invokeMethod<dynamic>('mediaVolume');
+      if (raw is! Map) return null;
+      return MixerVolume(
+        volume: (raw['volume'] as num?)?.toInt() ?? 0,
+        max: (raw['max'] as num?)?.toInt() ?? 0,
+        fixed: raw['fixed'] == true,
+        usb: raw['usb'] != false,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Media volume to max; Android shows its volume slider.
+  static Future<void> raiseMediaVolume() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _ch.invokeMethod<void>('raiseMediaVolume');
     } catch (_) {}
   }
 
