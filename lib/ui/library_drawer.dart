@@ -385,7 +385,7 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
                       icon: const Icon(Icons.audio_file, size: 22),
                     ),
                     IconButton(
-                      tooltip: 'Pick folder',
+                      tooltip: 'Pick music folder',
                       visualDensity: VisualDensity.compact,
                       onPressed: lib.loading || lib.analyzing ? null : lib.pickFolder,
                       icon: const Icon(Icons.folder_open, size: 22),
@@ -404,9 +404,13 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
                 child: _statusLine(lib),
               ),
+            if (_tab == 0 && lib.openPlaylistId != null && lib.playlists.isNotEmpty)
+              _localPlaylistHeader(),
             if (_tab == 1 && _openPlaylist != null) _playlistHeader(),
             Expanded(
-              child: _tab == 0 ? _localList(tracks) : _remoteList(),
+              child: _tab == 0
+                  ? (lib.showingPlaylistList ? _localPlaylistList() : _localList(tracks))
+                  : _remoteList(),
             ),
           ],
         ),
@@ -651,7 +655,8 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
         child: Padding(
           padding: EdgeInsets.all(24),
           child: Text(
-            'Tap the folder icon, choose your music folder.\n'
+            'Tap the folder icon and choose your music folder.\n'
+            'Its subfolders show up here as playlists.\n'
             'Then Analyze (waveform icon) for BPM/key, or tap A / B to load.',
             textAlign: TextAlign.center,
             style: TextStyle(color: SideDeckTheme.muted),
@@ -684,6 +689,66 @@ class _LibraryOverlayState extends State<LibraryOverlay> {
           ],
         );
       },
+    );
+  }
+
+  /// Subfolders of the music folder, plus All tracks and Picked files.
+  Widget _localPlaylistList() {
+    final lib = widget.library;
+    if (lib.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final entries = lib.playlistEntries;
+    return ListView.builder(
+      itemCount: entries.length,
+      itemBuilder: (context, i) {
+        final pl = entries[i];
+        final icon = pl.id == LibraryController.allTracksId
+            ? Icons.folder_open
+            : pl.id == LibraryController.pickedFilesId
+                ? Icons.audio_file
+                : Icons.queue_music;
+        return ListTile(
+          dense: true,
+          leading: Icon(icon, size: 22),
+          title: Text(pl.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${pl.trackCount} tracks',
+            style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+          ),
+          trailing: const Icon(Icons.chevron_right, size: 20, color: SideDeckTheme.muted),
+          onTap: () => lib.openPlaylist(pl.id),
+        );
+      },
+    );
+  }
+
+  Widget _localPlaylistHeader() {
+    final lib = widget.library;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 12, 4),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Playlists',
+            visualDensity: VisualDensity.compact,
+            onPressed: lib.closePlaylist,
+            icon: const Icon(Icons.arrow_back, size: 20),
+          ),
+          Expanded(
+            child: Text(
+              lib.openPlaylistName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Text(
+            '${lib.tracks.length} tracks',
+            style: const TextStyle(color: SideDeckTheme.muted, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 
