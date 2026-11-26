@@ -65,9 +65,13 @@ engine is compiled by CMake during the Xcode build.
 - BPM / key analysis on load (cached in SQLite); Camelot labels
 - Beat detector: Queen Mary TempoTrackV2 + Mixxx BeatUtils; key: Queen Mary GetKeyMode
 - Sync, loops (½ / ×2 on the waveform), BPM ±0.1, temporary pitch bend
+- Quantize (Settings, on by default): a deck started while the other plays lands on its beat
 - Waveform tap jumps ±4 beats; GRID edits the beatgrid (1 beat or 5 ms)
-- Local folder/file picker; sort; analyze missing or all (iPhone: Files app / Finder sharing)
-- Library highlights keys compatible with a loaded deck
+- Waveform styles: Solid, Dot matrix or Curve; Outdoor mode for a light screen in daylight
+- Local music folder whose subfolders show as playlists; file picker; sort; analyze missing
+  or all (iPhone: Files app / Finder sharing)
+- Library highlights keys compatible with a loaded deck and marks tracks you already played
+  (30 s on a deck; "New set" clears them)
 - Subsonic browse and cache-to-file
 - External USB mixer: Deck A → channels 1–2, Deck B → channels 3–4
 
@@ -84,6 +88,12 @@ Works with USB mixers that take two stereo decks this way, including the
 Teenage Engineering EP-136 K.O. Sidekick (set USB mode to **Multi**, not
 Controller). On iPhone, use USB-C or a Lightning camera adapter; the mixer
 must be class-compliant USB audio.
+
+On Android, **USB buffer** in Settings trades safety for response time:
+Safe (~50 ms), Low (~20 ms) or Ultra (~10 ms). Settings shows the underrun
+count and an output latency estimate while the mixer is on, so you can find
+the smallest setting your phone plays without crackles. If Low or Ultra
+does not start, SideDeck falls back to Safe and says so.
 
 ## Subsonic
 
@@ -105,7 +115,16 @@ native/engine/       C++ engine, EQ, analysis, iOS Core Audio
 android/app/         Android host, USB AudioTrack output
 ios/                 iPhone host, CMake engine build
 third_party/         Oboe, Signalsmith, qm-dsp, dr_libs, ogg/opus/opusfile/vorbis
+assets/fonts/        Space Grotesk (SIL OFL 1.1), the UI font
 test/                Dart tests
+native/engine/test/  Host unit tests for engine helpers (ctest)
+```
+
+Engine helper tests run on the host:
+
+```bash
+cmake -S native/engine -B build/native-tests && cmake --build build/native-tests
+ctest --test-dir build/native-tests --output-on-failure
 ```
 
 ## License
