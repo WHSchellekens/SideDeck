@@ -14,6 +14,8 @@ __attribute__((used)) static void* const kDjFfiKeep[] = {
     (void*)&dj_last_error,
     (void*)&dj_unload,
     (void*)&dj_play,
+    (void*)&dj_set_quantize,
+    (void*)&dj_get_quantize,
     (void*)&dj_seek,
     (void*)&dj_position,
     (void*)&dj_duration,

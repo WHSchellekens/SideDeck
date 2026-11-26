@@ -4,6 +4,7 @@
 #include "biquad.hpp"
 #include "id3_meta.hpp"
 #include "last_error.hpp"
+#include "quantize.hpp"
 
 #include "log.hpp"
 #include "signalsmith-stretch.h"
@@ -51,6 +52,9 @@ constexpr int kMaxStretchInFrames = kMaxCallbackFrames * 2 + 256;
 // Loop wrap crossfade, in source frames (~10 ms at 48 kHz). Long enough to
 // hide a bass phase jump at the splice.
 constexpr int kLoopFadeFrames = 512;
+// Largest quantize catch-up done by rendering ahead (Engine::catchUp), in
+// output frames (~170 ms at 48 kHz). Beyond it, re-align and re-prime.
+constexpr int kMaxCatchUpFrames = kMaxCallbackFrames * 4;
 
 constexpr float kEqLowHz = 246.0f;
 constexpr float kEqHighHz = 2484.0f;
@@ -118,6 +122,13 @@ struct Deck {
   std::vector<float> loopXfL, loopXfR;
   float gate = 0.0f;
   bool pauseXf = false;
+
+  // Quantized start: dj_play aligns and primes on the UI thread, then the
+  // deck waits, silent, for Engine::applyPendingQuantize() at the top of the
+  // next render callback. That check reads the other deck at the exact first
+  // sample of the callback and re-aligns only if it moved in between.
+  std::atomic<bool> quantizePending{false};
+  double quantizeRefFrames = -1.0; // other deck's playhead dj_play aligned against
 
   std::vector<float> waveMin;
   std::vector<float> waveMax;
@@ -381,6 +392,32 @@ struct Deck {
     loopStart = std::max(0.0, loopStart + deltaSec);
     loopEnd = loopStart + len;
   }
+
+  // Move the playhead by the smallest amount (at most half a beat) that puts
+  // it on the same beat phase as a deck at refPosSec. Stays inside an active
+  // loop and inside the file. The caller re-primes the stretcher if keylock is
+  // on. Returns true if the playhead moved.
+  bool alignToBeat(double refPosSec, double refBpm, double refOffsetSec) {
+    if (!(bpm > 0.0f) || !(refBpm > 0.0) || totalFrames < 2) {
+      return false;
+    }
+    const double sr = (double)std::max(1, sampleRate);
+    const double pos = playhead / sr;
+    const double shift = quantize::alignShiftSec(refPosSec, refBpm, refOffsetSec, pos, (double)bpm,
+                                                 (double)beatOffset);
+    const double start = quantize::placeStart(pos, shift, 60.0 / (double)bpm,
+                                              (double)totalFrames / sr, loopEnabled, loopStart,
+                                              loopEnd);
+    const double dest = std::min(start * sr, (double)totalFrames - 1.0);
+    if (std::fabs(dest - playhead) < 0.5) {
+      return false;
+    }
+    playhead = dest;
+    flushStretcher();
+    resetFilters();
+    hintHot();
+    return true;
+  }
 };
 
 std::vector<float> resampleMono(const std::vector<float>& mono, int srcSr, int dstSr) {
@@ -439,6 +476,7 @@ struct Engine {
   std::atomic<float> xfader{0.5f};
   std::atomic<float> master{1.0f};
   std::atomic<int> outputMode{0}; // 0 internal 2ch, 1 external 4ch
+  std::atomic<bool> quantizeOn{true};
   std::atomic<int> engineSampleRate{48000};
   std::atomic<int> engineChannels{2};
   std::atomic<bool> alive{true};
@@ -629,6 +667,110 @@ struct Engine {
 #endif
   }
 
+  // A deck's beat clock, for lining another deck up with it.
+  struct BeatRef {
+    bool playing = false;
+    double playheadFrames = 0.0;
+    double posSec = 0.0;
+    double bpm = 0.0;
+    double offsetSec = 0.0;
+  };
+
+  static BeatRef beatRefLocked(const Deck& d) {
+    BeatRef r;
+    r.playing = d.loaded && d.playing && !d.quantizePending.load();
+    r.playheadFrames = d.playhead;
+    r.posSec = d.playhead / (double)std::max(1, d.sampleRate);
+    r.bpm = (double)d.bpm;
+    r.offsetSec = (double)d.beatOffset;
+    return r;
+  }
+
+  BeatRef beatRef(Deck& d) {
+    std::lock_guard<std::mutex> lock(d.mutex);
+    return beatRefLocked(d);
+  }
+
+  // Top of every render callback, before either deck renders: the playing
+  // deck's playhead is exactly the first sample of this callback, so the
+  // starting deck lands on its beat phase sample-accurately, whatever the
+  // output latency. Only try_lock here; a busy deck waits for the next
+  // callback (the starting deck stays silent until then).
+  void applyPendingQuantize() {
+    for (int i = 0; i < 2; ++i) {
+      Deck& d = decks[i];
+      if (!d.quantizePending.load(std::memory_order_acquire)) {
+        continue;
+      }
+      std::unique_lock<std::mutex> lock(d.mutex, std::try_to_lock);
+      if (!lock.owns_lock()) {
+        continue;
+      }
+      BeatRef ref;
+      {
+        Deck& other = decks[1 - i];
+        std::unique_lock<std::mutex> otherLock(other.mutex, std::try_to_lock);
+        if (!otherLock.owns_lock()) {
+          continue;
+        }
+        ref = beatRefLocked(other);
+      }
+      d.quantizePending.store(false, std::memory_order_release);
+      if (!d.playing || !ref.playing) {
+        continue;
+      }
+      // dj_play already aligned against this exact playhead and primed.
+      if (ref.playheadFrames == d.quantizeRefFrames) {
+        continue;
+      }
+      // Usually the other deck moved on by a callback or so: catch up.
+      syncStart(d, ref);
+    }
+  }
+
+  // Put a starting deck on ref's beat phase. A primed keylock deck that is a
+  // little behind is caught up by rendering ahead and discarding the audio:
+  // the stretcher stays continuous and is not primed again (a prime on the
+  // audio thread drops buffers for both decks). Otherwise re-align, and
+  // keylock re-primes.
+  void syncStart(Deck& d, const BeatRef& ref) {
+    if (!(d.bpm > 0.0f) || !(ref.bpm > 0.0)) {
+      return;
+    }
+    const double sr = (double)std::max(1, d.sampleRate);
+    const double shift = quantize::alignShiftSec(ref.posSec, ref.bpm, ref.offsetSec,
+                                                 d.playhead / sr, (double)d.bpm,
+                                                 (double)d.beatOffset);
+    if (std::fabs(shift) * sr < 0.5) {
+      return;
+    }
+    if (d.keylock && d.stretchPrimed && shift > 0.0 && catchUp(d, shift)) {
+      return;
+    }
+    if (d.alignToBeat(ref.posSec, ref.bpm, ref.offsetSec) && d.keylock) {
+      d.primeStretcher(d.rate);
+    }
+  }
+
+  // Advance a primed deck by shiftSec of file time by rendering into scratch
+  // and discarding it. False when the shift is too long for that.
+  bool catchUp(Deck& d, double shiftSec) {
+    const double sr = (double)std::max(1, d.sampleRate);
+    const double perOutput = std::max(0.5, (double)d.rate); // file frames per output frame
+    long total = std::lround(shiftSec * sr / perOutput);
+    if (total <= 0 || total > kMaxCatchUpFrames) {
+      return false;
+    }
+    while (total > 0 && d.playing) {
+      const int n = (int)std::min<long>(total, kMaxCallbackFrames);
+      // jumpXf is free here: the deck is starting, so no jump or pause fade
+      // is in flight.
+      renderPlay(d, d.jumpXfL.data(), d.jumpXfR.data(), n, true);
+      total -= n;
+    }
+    return true;
+  }
+
   void closeStream() {
     AtomicFlag busy(managingStream);
     std::lock_guard<std::mutex> lock(streamMutex);
@@ -653,6 +795,13 @@ struct Engine {
       return;
     }
     if (!d.loaded || d.totalFrames < 2) {
+      std::fill(left, left + frames, 0.0f);
+      std::fill(right, right + frames, 0.0f);
+      return;
+    }
+    if (d.quantizePending.load(std::memory_order_acquire)) {
+      // Quantized start: begins at the top of the next callback, never
+      // part-way through this one.
       std::fill(left, left + frames, 0.0f);
       std::fill(right, right + frames, 0.0f);
       return;
@@ -814,6 +963,7 @@ struct Engine {
       return;
     }
     const int n = std::min(frames, kMaxCallbackFrames);
+    applyPendingQuantize();
     renderDeck(decks[0], mixAL.data(), mixAR.data(), n);
     renderDeck(decks[1], mixBL.data(), mixBR.data(), n);
 
@@ -1014,6 +1164,7 @@ int dj_load_with_analysis(DjEngine engine, int deck, const char* path, float bpm
     d.loaded = false;
     d.pendingJump.store(-1);
     d.pendingLoopShift.store(false);
+    d.quantizePending.store(false);
     d.gate = 0.0f;
     d.pauseXf = false;
   }
@@ -1115,6 +1266,7 @@ void dj_unload(DjEngine engine, int deck) {
     d.playing = false;
     d.pendingJump.store(-1);
     d.pendingLoopShift.store(false);
+    d.quantizePending.store(false);
     d.gate = 0.0f;
     d.pauseXf = false;
     d.waveMin.clear();
@@ -1129,16 +1281,45 @@ void dj_play(DjEngine engine, int deck, int playing) {
   if (deck < 0 || deck > 1) {
     return;
   }
-  Deck& d = asEngine(engine)->decks[deck];
+  auto* e = asEngine(engine);
+  Deck& d = e->decks[deck];
+  Deck& o = e->decks[1 - deck];
+  // Snapshot the other deck before locking this one: the playing deck must
+  // never wait on this deck's prime (it would drop a buffer).
+  const Engine::BeatRef other = e->beatRef(o);
   std::lock_guard<std::mutex> lock(d.mutex);
   const bool start = playing != 0 && d.loaded;
+  const bool starting = start && !d.playing;
   d.playing = start;
+  d.quantizePending.store(false);
+  const bool align =
+      starting && e->quantizeOn.load() && other.playing && d.bpm > 0.0f && other.bpm > 0.0;
+  if (align) {
+    d.alignToBeat(other.posSec, other.bpm, other.offsetSec);
+  }
   // Warm the stretcher here (UI thread) so the first keylock callback does
   // not spend its whole period priming and starve the other deck.
   if (start && d.keylock && !d.stretchPrimed) {
     d.primeStretcher(d.rate);
   }
+  if (align) {
+    // The other deck kept playing during the prime. Catch up to where it is
+    // now, here on the UI thread, so the callback that starts this deck has
+    // at most a callback's worth left (see Engine::applyPendingQuantize).
+    const Engine::BeatRef now = e->beatRef(o);
+    if (now.playing) {
+      e->syncStart(d, now);
+    }
+    d.quantizeRefFrames = now.playheadFrames;
+    d.quantizePending.store(true);
+  }
 }
+
+void dj_set_quantize(DjEngine engine, int enabled) {
+  asEngine(engine)->quantizeOn.store(enabled != 0);
+}
+
+int dj_get_quantize(DjEngine engine) { return asEngine(engine)->quantizeOn.load() ? 1 : 0; }
 
 void dj_seek(DjEngine engine, int deck, double seconds) {
   if (deck < 0 || deck > 1) {

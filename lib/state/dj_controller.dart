@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidedeck/engine/analysis_cache.dart';
 import 'package:sidedeck/engine/native_engine.dart';
 import 'package:sidedeck/engine/track_analyzer.dart';
@@ -43,7 +44,10 @@ class DjController extends ChangeNotifier {
       engineError = 'Audio engine failed to start.';
     }
     _usbSub = UsbOutput.events().listen(_onUsbEvent);
+    _loadPrefs();
   }
+
+  static const _quantizePref = 'quantize';
 
   late final NativeEngine _engine;
   late final Timer _ticker;
@@ -63,8 +67,38 @@ class DjController extends ChangeNotifier {
   int? loadingDeck;
   String? loadingTitle;
   String? loadingPath;
+  /// Settings > Quantize: a deck that starts while the other plays lands on
+  /// its beat phase. The engine does the alignment; this mirrors the toggle.
+  bool quantize = true;
+  bool _disposed = false;
 
   DeckState deck(int i) => i == 0 ? deckA : deckB;
+
+  void _emit() {
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> _loadPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      quantize = prefs.getBool(_quantizePref) ?? true;
+    } catch (_) {
+      return;
+    }
+    if (_disposed) return;
+    _engine.setQuantize(quantize);
+    _emit();
+  }
+
+  Future<void> setQuantize(bool enabled) async {
+    quantize = enabled;
+    _engine.setQuantize(enabled);
+    _emit();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_quantizePref, enabled);
+    } catch (_) {}
+  }
 
   void clearError() {
     engineError = null;
@@ -271,6 +305,8 @@ class DjController extends ChangeNotifier {
     final next = !d.playing;
     _engine.play(deckIndex, next);
     d.playing = next;
+    // Quantize may have moved the start onto the other deck's beat.
+    if (next) d.position = _engine.position(deckIndex);
     notifyListeners();
   }
 
@@ -602,6 +638,7 @@ class DjController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _usbSub?.cancel();
     _ticker.cancel();
     _nudgeHold[0]?.cancel();

@@ -31,6 +31,12 @@ DJ_FFI_EXPORT int dj_load(DjEngine engine, int deck, const char* path);
 DJ_FFI_EXPORT void dj_unload(DjEngine engine, int deck);
 
 DJ_FFI_EXPORT void dj_play(DjEngine engine, int deck, int playing);
+
+/** Quantized start (default on): a deck that starts while the other deck plays is moved,
+ *  by at most half a beat, onto the playing deck's beat phase. Applied at the top of the
+ *  next render callback, so it is sample-accurate and independent of output latency. */
+DJ_FFI_EXPORT void dj_set_quantize(DjEngine engine, int enabled);
+DJ_FFI_EXPORT int dj_get_quantize(DjEngine engine);
 DJ_FFI_EXPORT void dj_seek(DjEngine engine, int deck, double seconds);
 DJ_FFI_EXPORT void dj_set_cue(DjEngine engine, int deck);
 DJ_FFI_EXPORT void dj_jump_cue(DjEngine engine, int deck);

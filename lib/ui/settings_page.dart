@@ -112,6 +112,24 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 32),
           const Text(
+            'Playback',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Quantize'),
+            subtitle: const Text(
+              'A deck you start while the other one plays lands on its beat. '
+              'It moves at most half a beat.',
+            ),
+            value: widget.dj.quantize,
+            onChanged: (v) async {
+              await widget.dj.setQuantize(v);
+              if (mounted) setState(() {});
+            },
+          ),
+          const Divider(height: 32),
+          const Text(
             'Subsonic server',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),

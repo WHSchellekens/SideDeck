@@ -22,6 +22,7 @@ typedef _LoadAnalyzedC = Int32 Function(
 );
 typedef _UnloadC = Void Function(Pointer<Void>, Int32);
 typedef _PlayC = Void Function(Pointer<Void>, Int32, Int32);
+typedef _SetFlagC = Void Function(Pointer<Void>, Int32);
 typedef _SeekC = Void Function(Pointer<Void>, Int32, Double);
 typedef _PosC = Double Function(Pointer<Void>, Int32);
 typedef _PlayingC = Int32 Function(Pointer<Void>, Int32);
@@ -80,6 +81,10 @@ class NativeEngine {
       .lookupFunction<_UnloadC, void Function(Pointer<Void>, int)>('dj_unload');
   late final _play = _lib
       .lookupFunction<_PlayC, void Function(Pointer<Void>, int, int)>('dj_play');
+  late final _setQuantize = _lib
+      .lookupFunction<_SetFlagC, void Function(Pointer<Void>, int)>(
+        'dj_set_quantize',
+      );
   late final _seek = _lib
       .lookupFunction<_SeekC, void Function(Pointer<Void>, int, double)>('dj_seek');
   late final _position = _lib
@@ -229,6 +234,7 @@ class NativeEngine {
 
   void unload(int deck) => _unload(_handle, deck);
   void play(int deck, bool playing) => _play(_handle, deck, playing ? 1 : 0);
+  void setQuantize(bool enabled) => _setQuantize(_handle, enabled ? 1 : 0);
   void seek(int deck, double seconds) => _seek(_handle, deck, seconds);
   double position(int deck) => _position(_handle, deck);
   double duration(int deck) => _duration(_handle, deck);
